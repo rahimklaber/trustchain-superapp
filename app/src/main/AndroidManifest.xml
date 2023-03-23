@@ -176,6 +176,11 @@
                 android:name="android.app.searchable"
                 android:resource="@xml/searchable" />
         </activity>
+        <activity
+            android:name="nl.tudelft.trustchain.frostdao.Overview"
+            android:exported="true"
+            android:label="FrostDAO">
+        </activity>
 
         <service
             android:name="nl.tudelft.trustchain.app.service.TrustChainService"

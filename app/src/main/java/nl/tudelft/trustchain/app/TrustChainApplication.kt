@@ -65,6 +65,7 @@ import nl.tudelft.trustchain.currencyii.CoinCommunity
 import nl.tudelft.trustchain.detoks.DeToksCommunity
 import nl.tudelft.trustchain.eurotoken.community.EuroTokenCommunity
 import nl.tudelft.trustchain.eurotoken.db.TrustStore
+import nl.tudelft.trustchain.frostdao.ipv8.FrostCommunity
 import nl.tudelft.trustchain.gossipML.RecommenderCommunity
 import nl.tudelft.trustchain.gossipML.db.RecommenderStore
 import nl.tudelft.trustchain.literaturedao.ipv8.LiteratureCommunity
@@ -119,7 +120,8 @@ class TrustChainApplication : Application() {
                 createRecommenderCommunity(),
                 createIdentityCommunity(),
                 createFOCCommunity(),
-                createDeToksCommunity()
+                createDeToksCommunity(),
+                createFrostCommunity()
             ),
             walkerInterval = 5.0
         )
@@ -454,6 +456,30 @@ class TrustChainApplication : Application() {
         return OverlayConfiguration(
             DeToksCommunity.Factory(this),
             listOf(randomWalk)
+        )
+    }
+
+    private fun createFrostCommunity() : OverlayConfiguration<FrostCommunity> {
+        val randomWalk = RandomWalk.Factory()
+        val randomChurn = RandomChurn.Factory()
+        val periodicSimilarity = PeriodicSimilarity.Factory()
+
+        val nsd = NetworkServiceDiscovery.Factory(
+            getSystemService() ?: error("could not find nsdmanager")
+        )
+//        val bluetoothManager = getSystemService<BluetoothManager>()
+//            ?: throw IllegalStateException("BluetoothManager not available")
+        val strategies = mutableListOf(
+            randomWalk/*, randomChurn*//*, periodicSimilarity*/, nsd
+        )
+//        if (bluetoothManager.adapter != null && Build.VERSION.SDK_INT >= 24) {
+//            val ble = BluetoothLeDiscovery.Factory()
+//            strategies += ble
+//        }
+
+        return OverlayConfiguration(
+            Overlay.Factory(FrostCommunity::class.java),
+            strategies
         )
     }
 

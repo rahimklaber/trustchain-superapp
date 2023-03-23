@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<navigation xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:id="@+id/mobile_navigation"
+    app:startDestination="@id/frostSettings">
+    <fragment
+        android:id="@+id/frostSettings"
+        android:name="nl.tudelft.trustchain.frostdao.ui.settings.FrostSettings"
+        android:label="fragment_frost_settings"
+        tools:layout="@layout/fragment_frost_settings"/>
+    <fragment
+        android:id="@+id/propose"
+        android:name="nl.tudelft.trustchain.frostdao.ui.make_proposal.Propose"
+        android:label="fragment_propose"
+        tools:layout="@layout/fragment_propose" />
+    <fragment
+        android:id="@+id/proposals"
+        android:name="nl.tudelft.trustchain.frostdao.ui.proposals.Proposals"
+        android:label="fragment_proposals"
+        tools:layout="@layout/fragment_proposals" />
+</navigation>

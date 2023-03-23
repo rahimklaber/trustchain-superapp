@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<menu xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <item
+        android:id="@+id/frostSettings"
+        android:icon="@drawable/ic_home_black_24dp"
+        android:title="info" />
+
+    <item
+        android:id="@+id/propose"
+        android:icon="@drawable/ic_dashboard_black_24dp"
+        android:title="create" />
+
+    <item
+        android:id="@+id/proposals"
+        android:icon="@drawable/ic_launcher_background"
+        android:title="proposals"
+        />
+
+</menu>
