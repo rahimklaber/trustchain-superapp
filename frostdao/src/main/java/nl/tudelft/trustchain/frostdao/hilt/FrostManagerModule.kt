@@ -11,6 +11,8 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
 import kotlinx.coroutines.*
 import kotlinx.coroutines.selects.select
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import nl.tudelft.trustchain.frostdao.FrostViewModel
 import nl.tudelft.trustchain.frostdao.database.FrostDatabase
 import nl.tudelft.trustchain.frostdao.database.Request
@@ -39,7 +41,7 @@ object FrostManagerModule {
             db = db,
             networkManager = object : NetworkManager() {
                 override fun peers(): List<Peer> = frostCommunity.getPeers()
-                override suspend fun send(peer: Peer, msg: FrostMessage): Boolean {
+                override suspend fun send(peer: Peer, msg: FrostMessage): Pair<Boolean, Int> {
                     Log.d("FROST", "sending: $msg")
                     db.sentMessageDao().insertSentMessage(
                         SentMessage(
@@ -72,10 +74,11 @@ object FrostManagerModule {
                     }
 
                     frostCommunity.sendForPublic(peer, msg)
-
+                    var amountDropped = 0
                     for (i in 0..5) {
                         val x = select {
                             onTimeout(1000) {
+                                amountDropped +=1
                                 Log.d("FROST","resending $msg $i th time")
                                 frostCommunity.sendForPublic(peer, msg)
                                 false
@@ -98,11 +101,11 @@ object FrostManagerModule {
 
                     frostCommunity.removeOnAck(cbId)
 
-                    return done.isCompleted
+                    return done.isCompleted to amountDropped
 
                 }
 
-                override suspend fun broadcast(msg: FrostMessage, recipients: List<Peer>): Boolean {
+                override suspend fun broadcast(msg: FrostMessage, recipients: List<Peer>): Pair<Boolean, Int> {
                     val recipients = recipients.ifEmpty {
                         frostCommunity.getPeers()
                     }
@@ -129,6 +132,14 @@ object FrostManagerModule {
                                 )
                             )
                     }
+                    var amountDropped = 0
+                    val droppedMutex = Mutex()
+                    val incDropped  = suspend {
+                        droppedMutex.withLock {
+                            amountDropped+=1
+                        }
+                    }
+
                     val workScope = CoroutineScope(Dispatchers.Default)
                     val deferreds = recipients.map { peer ->
                         workScope.async {
@@ -149,6 +160,7 @@ object FrostManagerModule {
                                     onTimeout(1000) {
                                         //todo what if this is the last iteration
                                         frostCommunity.sendForPublic(peer, msg)
+                                        incDropped()
                                         false
                                     }
                                     done.onAwait {
@@ -174,11 +186,11 @@ object FrostManagerModule {
                         // failed
                         if(!deferred.await()){
                             workScope.cancel()
-                            return false
+                            return false to amountDropped
                         }
                     }
                     //success
-                    return true
+                    return true to amountDropped
 
                 }
 

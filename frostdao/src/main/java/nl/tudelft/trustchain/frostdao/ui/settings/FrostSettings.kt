@@ -47,13 +47,14 @@ class FrostSettings : Fragment() {
             setContent {
                 Box(
                     Modifier
-                        .fillMaxSize()
+                        .fillMaxSize()///
                         .border(2.dp, Color.Gray)){
                     Column(Modifier.padding(horizontal = 4.dp)) {
                         Text("State: ${frostViewModel.state}", fontSize = 16.sp)
                         Text("Frost Index ${frostViewModel.index ?: "N/A"}", fontSize = 16.sp)
                         Text("Threshold: ${frostViewModel.threshold ?: "N/A"}", fontSize = 16.sp)
                         Text("Amount of Members: ${frostViewModel.amountOfMembers ?: "N/A"}", fontSize = 16.sp)
+                        Text("Amount of dropped messages: ${frostViewModel.amountDropped}",fontSize = 16.sp)
                         Divider(thickness = 2.dp)
                         Text("Peers")
                         LazyColumn{

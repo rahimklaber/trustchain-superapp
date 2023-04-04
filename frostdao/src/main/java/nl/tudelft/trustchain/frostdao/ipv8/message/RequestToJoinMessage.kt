@@ -3,20 +3,23 @@ package nl.tudelft.trustchain.frostdao.ipv8.message
 import nl.tudelft.ipv8.messaging.Deserializable
 
 data class RequestToJoinMessage(
-    override val id: Long // some random id to keep track of the request
+    override val id: Long, // some random id to keep track of the request,
+    val orignalMid: String? = null, // for when forwarding requests to
 ) : FrostMessage {
     override fun serialize(): ByteArray {
-        return id.toString().toByteArray()
+        return "$id#${orignalMid ?: ""}".encodeToByteArray()
     }
 
     companion object Deserializer : Deserializable<RequestToJoinMessage> {
         const val MESSAGE_ID = 0
         override fun deserialize(buffer: ByteArray, offset: Int): Pair<RequestToJoinMessage, Int> {
+            val (idStr, originalMid) = buffer.slice(offset until buffer.size)
+                .toByteArray()
+                .toString(Charsets.UTF_8)
+                .split("#")
             return RequestToJoinMessage(
-                buffer.slice(offset until buffer.size)
-                    .toByteArray()
-                    .toString(Charsets.UTF_8)
-                    .toLong()
+                idStr.toLong(),
+                originalMid.ifBlank { null }
             ) to buffer.size
         }
 

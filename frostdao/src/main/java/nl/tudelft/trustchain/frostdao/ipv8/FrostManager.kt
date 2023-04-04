@@ -7,6 +7,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withLock
 import nl.tudelft.trustchain.frostdao.SchnorrAgent
 import nl.tudelft.trustchain.frostdao.SchnorrAgentMessage
 import nl.tudelft.trustchain.frostdao.SchnorrAgentOutput
@@ -27,11 +28,11 @@ fun FrostGroup.getMidForIndex(index: Int) = members.find { it.index == index }?.
 
 abstract class NetworkManager{
     val defaultScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-    abstract suspend fun send(peer: Peer, msg: FrostMessage): Boolean
+    abstract suspend fun send(peer: Peer, msg: FrostMessage): Pair<Boolean, Int>
     abstract fun getMyPeer() : Peer
     abstract fun getPeerFromMid(mid: String) : Peer
     abstract fun peers() : List<Peer>
-    abstract suspend fun broadcast(msg: FrostMessage, recipients: List<Peer> = listOf()): Boolean
+    abstract suspend fun broadcast(msg: FrostMessage, recipients: List<Peer> = listOf()): Pair<Boolean, Int>
 }
 sealed interface Update{
     data class KeyGenDone(val pubkey: String) : Update
@@ -100,6 +101,13 @@ class FrostManager(
     val msgProcessMap: MutableMap<KClass< out FrostMessage>, suspend (Peer, FrostMessage)->Unit> = mutableMapOf(
 
     )
+    var droppedMsgs = 0
+    private val droppedMsgsMutex = Mutex(false)
+    suspend fun addDroppedMsgs(toadd: Int){
+        droppedMsgsMutex.withLock {
+            droppedMsgs+= toadd
+        }
+    }
 
     init {
         msgProcessMap[RequestToJoinMessage::class] = { peer, msg -> processRequestToJoin(peer,
@@ -285,7 +293,8 @@ class FrostManager(
                         mutex.unlock()
                     }
                 }
-                val broadcastOk = networkManager.broadcast(SignRequest(signId, data))
+                val (broadcastOk, amountDropped) = networkManager.broadcast(SignRequest(signId, data))
+                addDroppedMsgs(amountDropped)
                 if (!broadcastOk){
                     updatesChannel.emit(Update.TimeOut(signId))
                     return@withTimeout
@@ -316,7 +325,8 @@ class FrostManager(
     }
 
     suspend fun acceptProposedSign(id: Long, fromMid: String, data: ByteArray){
-        val receivedAc = networkManager.send(networkManager.getPeerFromMid(fromMid), SignRequestResponse(id,true))
+        val (receivedAc, amountDropped) = networkManager.send(networkManager.getPeerFromMid(fromMid), SignRequestResponse(id,true))
+        addDroppedMsgs(amountDropped)
         if (!receivedAc){
             updatesChannel.emit(Update.TimeOut(id))
             return
@@ -565,10 +575,11 @@ class FrostManager(
                     is SchnorrAgentOutput.DkgShare -> {
                        scope.launch {
                             sendSemaphore.acquire()
-                           val ok = networkManager.send(
+                           val (ok, amountDropped) = networkManager.send(
                                networkManager.getPeerFromMid(getMidFromIndex(agentOutput.forIndex)),
                                KeyGenShare(joinId, agentOutput.share)
                            )
+                           addDroppedMsgs(amountDropped)
                         sendSemaphore.release()
                            if(!ok)
                                fail()
@@ -578,7 +589,8 @@ class FrostManager(
                     is SchnorrAgentOutput.KeyCommitment -> {
                        scope.launch {
                         sendSemaphore.acquire()
-                           val ok = networkManager.broadcast(KeyGenCommitments(joinId, agentOutput.commitment))
+                           val (ok, amountDropped) = networkManager.broadcast(KeyGenCommitments(joinId, agentOutput.commitment))
+                           addDroppedMsgs(amountDropped)
                             sendSemaphore.release()
                         if(!ok)
                                fail()
@@ -586,6 +598,36 @@ class FrostManager(
                     }
                     is SchnorrAgentOutput.KeyGenDone -> {
                         updatesChannel.emit(Update.KeyGenDone(agentOutput.pubkey.toHex()))
+                        while (sendSemaphore.availablePermits != semaphoreMaxPermits){
+                            delay(1000)
+                        }
+                        this@FrostManager.frostInfo = FrostGroup(
+                            (midsOfNewGroup.filter { it != networkManager.getMyPeer().mid }).map {
+                                FrostMemberInfo(
+                                    it,
+                                    getIndex(it)
+                                )
+                            },
+                            index,
+                            threshold = midsOfNewGroup.size / 2 + 1
+                        )
+
+                        dbMe = dbMe.copy(
+                            frostKeyShare = agent!!.keyWrapper.serialize(),
+                            frostMembers = midsOfNewGroup.filter { it != networkManager.getMyPeer().mid }.map {
+                                "$it#${frostInfo!!.getIndex(it)}"
+                            },
+                            frostN = midsOfNewGroup.size,
+                            frostIndex = index,
+                            frostThresholod = midsOfNewGroup.size / 2 + 1
+                        )
+
+                        db.meDao()
+                            .insert(dbMe)
+
+                        state = FrostState.ReadyForSign
+                        //cancel when done
+                        cancel()
                     }
                     else -> {
                         error("RCEIVED OUTPUT FOR SIGNING WHILE DOING KEYGEN. SHOULD NOT HAPPEN")
@@ -626,36 +668,7 @@ class FrostManager(
         }
 
 
-        while (sendSemaphore.availablePermits != semaphoreMaxPermits){
-            delay(1000)
-        }
-        this@FrostManager.frostInfo = FrostGroup(
-            (midsOfNewGroup.filter { it != networkManager.getMyPeer().mid }).map {
-                FrostMemberInfo(
-                    it,
-                    getIndex(it)
-                )
-            },
-            index,
-            threshold = midsOfNewGroup.size / 2 + 1
-        )
 
-        dbMe = dbMe.copy(
-            frostKeyShare = agent!!.keyWrapper.serialize(),
-            frostMembers = midsOfNewGroup.filter { it != networkManager.getMyPeer().mid }.map {
-                "$it#${frostInfo!!.getIndex(it)}"
-            },
-            frostN = midsOfNewGroup.size,
-            frostIndex = index,
-            frostThresholod = midsOfNewGroup.size / 2 + 1
-        )
-
-        db.meDao()
-            .insert(dbMe)
-
-        state = FrostState.ReadyForSign
-        //cancel when done
-        cancel()
     }
     suspend fun joinGroup(){
         joinId = Random.nextLong()
@@ -666,7 +679,7 @@ class FrostManager(
         state = FrostState.ProposedJoin(joinId)
         updatesChannel.emit(Update.ProposedKeyGen(joinId))
 
-        val ok = scope.async(Dispatchers.Default) {
+        val okDeferred = scope.async(Dispatchers.Default) {
             // delay to start waiting before sending msg
             delay(1000)
             networkManager.broadcast(RequestToJoinMessage(joinId))
@@ -677,7 +690,9 @@ class FrostManager(
 
         // in this case, we have not received enough confirmations of peeers before timing out.
         // or messages were dropped
-        if (peersInGroup == null || !ok.await()){
+        val (ok, amountDropped) = okDeferred.await()
+        addDroppedMsgs(amountDropped)
+        if (peersInGroup == null || !ok){
             scope.launch {
                 updatesChannel.emit(Update.TimeOut(joinId))
             }
@@ -693,10 +708,12 @@ class FrostManager(
         var counter = 0
         val mutex = Mutex(true)
         val peers = mutableListOf<Peer>()
-        var amount: Int?
+        var amount: Int? = null
         val cbId = addJoinRequestResponseCallback{ peer, msg ->
             if (msg.id ==id){
-                amount = msg.amountOfMembers
+                if (amount == null){
+                    amount = msg.amountOfMembers
+                }
                 peers.add(peer)
                 counter++
                 if (counter == amount)
@@ -721,24 +738,49 @@ class FrostManager(
                 state = FrostState.KeyGen(msg.id)
                 scope.launch {
                     updatesChannel.emit(Update.StartedKeyGen(msg.id))
+                    // if this is the message from the "orignator"
+                    if(msg.orignalMid == null)
+                    {
+                        if(frostInfo != null){
+                            val ok = sendToParticipants(frostInfo!!.members.map { it.index },RequestToJoinMessage(msg.id, orignalMid = peer.mid))
+                            if (!ok){
+                               Log.d("FROST","Sending request to join to frost members failed")
+                                return@launch
+                            }
 
-                    networkManager.broadcast(RequestToJoinResponseMessage(msg.id, true, frostInfo?.amount ?: 1,
-                        (frostInfo?.members?.map { it.peer }
-                            ?.plus(networkManager.getMyPeer().mid))
-                            ?: listOf(
-                                networkManager.getMyPeer().mid
-                            )))
-                    keyGenJob = startKeyGen(msg.id,
-                        frostInfo?.members?.map(FrostMemberInfo::peer)?.plus(peer.mid)?.plus(networkManager.getMyPeer().mid)
-                            ?: (listOf(networkManager.getMyPeer()) + peer).map { it.mid }
-                    )
+                        }
+                        networkManager.send(peer,RequestToJoinResponseMessage(msg.id, true, frostInfo?.amount ?: 1,
+                            /*(frostInfo?.members?.map { it.peer }
+                                ?.plus(networkManager.getMyPeer().mid))
+                                ?: listOf(
+                                    networkManager.getMyPeer().mid
+                                )*/))
+                        keyGenJob = startKeyGen(msg.id,
+                            frostInfo?.members?.map(FrostMemberInfo::peer)?.plus(peer.mid)?.plus(networkManager.getMyPeer().mid)
+                                ?: (listOf(networkManager.getMyPeer()) + peer).map { it.mid }
+                        )
+                    }else{
+                        // in this, we know that we arre in a frost group
+                        networkManager.send(networkManager.getPeerFromMid(msg.orignalMid),RequestToJoinResponseMessage(msg.id, true, frostInfo?.amount ?: 1,
+                            /*(frostInfo?.members?.map { it.peer }
+                                ?.plus(networkManager.getMyPeer().mid))
+                                ?: listOf(
+                                    networkManager.getMyPeer().mid
+                                )*/))
+                        keyGenJob = startKeyGen(msg.id,
+                            frostInfo?.members?.map(FrostMemberInfo::peer)?.plus(msg.orignalMid)?.plus(networkManager.getMyPeer().mid)
+                                ?: error("we are not in a frostGroup, yet some thinks that we are")
+                        )
+                    }
+
+
                 }
             }
             else -> {
                 // log cannot do this while in this state?
                 // Maybe I should send a message bac to indicate this?
                 // Actually I probably should
-                networkManager.send(peer, RequestToJoinResponseMessage(msg.id,false,0, listOf()))
+                networkManager.send(peer, RequestToJoinResponseMessage(msg.id,false,0))
             }
         }
     }
@@ -748,7 +790,10 @@ class FrostManager(
             .map {
                 networkManager.getPeerFromMid(frostInfo?.getMidForIndex(it) ?: error("frostinfo null, this is a bug"))
             }
-        return networkManager.broadcast(frostMessage,participantPeers)
+
+        val (ok, amountDropped) = networkManager.broadcast(frostMessage,participantPeers)
+        addDroppedMsgs(amountDropped)
+        return ok
     }
 
     private fun processRequestToJoinResponse(peer: Peer, msg: RequestToJoinResponseMessage) {

@@ -71,6 +71,7 @@ class FrostViewModel(
     var index by mutableStateOf(frostManager.frostInfo?.myIndex)
     var amountOfMembers by mutableStateOf(frostManager.frostInfo?.amount)
     var threshold by mutableStateOf(frostManager.frostInfo?.threshold)
+    var amountDropped by mutableStateOf(frostManager.droppedMsgs)
 
     private var _peers = mutableStateOf<List<String>>(listOf())
     val peers by _peers
@@ -219,6 +220,7 @@ class FrostViewModel(
         index = frostManager.frostInfo?.myIndex
         amountOfMembers = frostManager.frostInfo?.amount
         threshold = frostManager.frostInfo?.threshold
+        amountDropped = frostManager.droppedMsgs
     }
     fun joinFrost(){
         viewModelScope.launch(Dispatchers.Default){
