@@ -73,14 +73,14 @@ object FrostManagerModule {
                         }
                     }
 
-                    frostCommunity.sendForPublic(peer, msg)
+                    frostCommunity.send(peer, msg)
                     var amountDropped = 0
                     for (i in 0..5) {
                         val x = select {
                             onTimeout(1000) {
                                 amountDropped +=1
                                 Log.d("FROST","resending $msg $i th time")
-                                frostCommunity.sendForPublic(peer, msg)
+                                frostCommunity.send(peer, msg)
                                 false
                             }
                             done.onAwait {
@@ -153,13 +153,13 @@ object FrostManagerModule {
                                 }
                             }
 
-                            frostCommunity.sendForPublic(peer, msg)
+                            frostCommunity.send(peer, msg)
 
                             for (i in 0..5) {
                                 val x = select {
                                     onTimeout(1000) {
                                         //todo what if this is the last iteration
-                                        frostCommunity.sendForPublic(peer, msg)
+                                        frostCommunity.send(peer, msg)
                                         incDropped()
                                         false
                                     }

@@ -21,6 +21,8 @@ import nl.tudelft.trustchain.frostdao.ipv8.message.*
 import java.util.*
 import kotlin.random.Random
 import kotlin.reflect.KClass
+import kotlin.time.Duration
+import kotlin.time.Duration.Companion.milliseconds
 
 
 fun FrostGroup.getIndex(mid: String) = members.find { it.peer == mid }?.index
@@ -28,6 +30,10 @@ fun FrostGroup.getMidForIndex(index: Int) = members.find { it.index == index }?.
 
 abstract class NetworkManager{
     val defaultScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+
+    /**
+     * @return (status, amount of packets dropped)
+     */
     abstract suspend fun send(peer: Peer, msg: FrostMessage): Pair<Boolean, Int>
     abstract fun getMyPeer() : Peer
     abstract fun getPeerFromMid(mid: String) : Peer
@@ -80,28 +86,30 @@ sealed interface FrostState{
 }
 
 typealias OnJoinRequestResponseCallback = (Peer, RequestToJoinResponseMessage) -> Unit
-typealias KeyGenCommitmentsCallaback = (Peer, KeyGenCommitments) -> Unit
+typealias KeyGenCommitmentsCallback = (Peer, KeyGenCommitments) -> Unit
 typealias KeyGenShareCallback = (Peer, KeyGenShare) -> Unit
 typealias SignShareCallback = (Peer, SignShare) -> Unit
 typealias PreprocessCallback = (Peer, Preprocess) -> Unit
 typealias SignRequestCallback = (Peer, SignRequest) -> Unit
 typealias SignRequestResponseCallback = (Peer, SignRequestResponse) -> Unit
 
+
 class FrostManager(
     val receiveChannel: Flow<Pair<Peer, FrostMessage>>,
     val db: FrostDatabase,
     val networkManager: NetworkManager,
-//    val getFrostInfo : () -> FrostGroup?,
+    private val config: FrostManagerConfig = defaultConfig,
     val updatesChannel: MutableSharedFlow<Update> = MutableSharedFlow(extraBufferCapacity = 10),
     var state: FrostState = FrostState.ReadyForKeyGen,
-    val scope: CoroutineScope = CoroutineScope(Dispatchers.Default + SupervisorJob())
+    private val scope: CoroutineScope = CoroutineScope(Dispatchers.Default + SupervisorJob())
 ) {
     var frostInfo: FrostGroup? = null
 //        get() = getFrostInfo()
-    val msgProcessMap: MutableMap<KClass< out FrostMessage>, suspend (Peer, FrostMessage)->Unit> = mutableMapOf(
+private val msgProcessMap: MutableMap<KClass< out FrostMessage>, suspend (Peer, FrostMessage)->Unit> = mutableMapOf(
 
     )
     var droppedMsgs = 0
+        private set
     private val droppedMsgsMutex = Mutex(false)
     suspend fun addDroppedMsgs(toadd: Int){
         droppedMsgsMutex.withLock {
@@ -126,21 +134,19 @@ class FrostManager(
         )}
     }
     var keyGenJob: Job? = null
-    var signJob: Job? = null
 
     val signJobs = mutableMapOf<Long, Job>()
 
-    var agent : SchnorrAgent? = null
+    private var agent : SchnorrAgent? = null
     var agentSendChannel = Channel<SchnorrAgentMessage>(1)
     var agentReceiveChannel = Channel<SchnorrAgentOutput>(1)
 
-    var joinId = -1L;
-    var joining = false;
+    private var joinId = -1L;
 
     lateinit var dbMe: Me
 
     val onJoinRequestResponseCallbacks = mutableMapOf<Int, OnJoinRequestResponseCallback>()
-    val onKeyGenCommitmentsCallBacks = mutableMapOf<Int, KeyGenCommitmentsCallaback>()
+    val onKeyGenCommitmentsCallBacks = mutableMapOf<Int, KeyGenCommitmentsCallback>()
     val onKeyGenShareCallbacks = mutableMapOf<Int, KeyGenShareCallback>()
     val onPreprocessCallbacks = mutableMapOf<Int, PreprocessCallback>()
     val onSignShareCallbacks = mutableMapOf<Int, SignShareCallback>()
@@ -153,7 +159,7 @@ class FrostManager(
         onJoinRequestResponseCallbacks[id] = cb
         return id
     }
-    fun addKeyGenCommitmentsCallbacks(cb : KeyGenCommitmentsCallaback) : Int{
+    fun addKeyGenCommitmentsCallbacks(cb : KeyGenCommitmentsCallback) : Int{
         val id = cbCounter++
         onKeyGenCommitmentsCallBacks[id] = cb
         return id
@@ -275,7 +281,6 @@ class FrostManager(
 //        state = FrostState.ProposedSign(signId)
 
          scope.launch {
-            withTimeout(10*60*1000/*10 minutes timeout todo make it configurable*/) {
                 var responseCounter = 0
                 val mutex = Mutex(true)
                 val participatingIndices = mutableListOf<Int>()
@@ -297,9 +302,17 @@ class FrostManager(
                 addDroppedMsgs(amountDropped)
                 if (!broadcastOk){
                     updatesChannel.emit(Update.TimeOut(signId))
-                    return@withTimeout
+                    return@launch
                 }
-                mutex.lock()// make sure that enough peeps are available
+
+                val enoughResponsesReceived = withTimeoutOrNull(config.waitForSignResponseTimeout) {
+                    mutex.lock()// make sure that enough peeps are available
+                }
+
+                if(enoughResponsesReceived == null){
+                    updatesChannel.emit(Update.TimeOut(signId))
+                    return@launch
+                }
 
                 onSignRequestResponseCallbacks.remove(callbacId)
 
@@ -317,7 +330,6 @@ class FrostManager(
                             ?: error(" FrostInfo is null. This is a bug. Maybe you are trying to sign without having first joined a group")
                     ))
                 )
-            }
         }
 
 
@@ -344,47 +356,6 @@ class FrostManager(
     }
 
 
-//    suspend fun proposeSign(data: ByteArray){
-//        when(state){
-//            FrostState.ReadyForSign -> Unit
-//            else -> {
-//                updatesChannel.emit(Update.TextUpdate("not ready for sign"))
-//                return
-//            }
-//        }
-//        val signId = Random.nextLong()
-//        state = FrostState.ProposedSign(signId)
-//
-//
-//        var responseCounter = 0
-//        val mutex = Mutex(true)
-//        val participatingIndices = mutableListOf<Int>()
-//        val callbacId = addOnSignRequestResponseCallbac { peer, signRequestResponse ->
-//            if (signRequestResponse.ok)
-//                responseCounter += 1
-//            participatingIndices.add(
-//                frostInfo?.getIndex(peer.mid)
-//                    ?: error(" FrostInfo is null. This is a bug. Maybe you are trying to sign without having first joined a group")
-//            )
-//            if (responseCounter >= frostInfo!!.threshold - 1) {
-//                mutex.unlock()
-//            }
-//        }
-//        networkManager.broadcast(SignRequest(signId, data))
-//        mutex.lock()// make sure that enough peeps are available
-//
-//        onSignRequestResponseCallbacks.remove(callbacId)
-//
-//        Log.d("FROST", "started sign")
-//         startSign(
-//            signId, data, true,
-//            (participatingIndices.plus(
-//                frostInfo?.myIndex
-//                    ?: error(" FrostInfo is null. This is a bug. Maybe you are trying to sign without having first joined a group")
-//            ))
-//        )
-//
-//    }
 
     private suspend fun startSign(
         signId: Long,
@@ -406,7 +377,6 @@ class FrostManager(
             if (msg.id  != signId)
                 return@addSignShareCallback
             launch {
-                delay(200)
                 agentSendChannel.send(
                     SchnorrAgentOutput.SignShare(
                         msg.bytes,
@@ -420,7 +390,6 @@ class FrostManager(
                 return@addPreprocessCallabac
             }
             launch {
-                delay(200)
                 if (!isProposer && mutex.isLocked && preprocess.participants.isNotEmpty()) { // only the init message has size > 0
                     mutex.unlock()
                     participantIndices.addAll(preprocess.participants)
@@ -437,7 +406,6 @@ class FrostManager(
         fun fail(){
             state =
                 FrostState.ReadyForSign
-            //todo timed out/ messaged dropped same thing?
             removePreprocessCallback(preprocessCbId)
             removeSignShareCallback(signShareCbId)
             scope.launch {
@@ -491,7 +459,7 @@ class FrostManager(
         }
         if(!isProposer){
             // wait for initial msg to signal that we can start
-            val lockReceived = withTimeoutOrNull(WAIT_FOR_INITIAL_PREPROCESS_MILLIS){
+            val lockReceived = withTimeoutOrNull(config.waitForInitialPreprocessTimeout){
                 mutex.lock()
             }
 
@@ -500,7 +468,7 @@ class FrostManager(
             }
         }
 
-        val signDone =withTimeoutOrNull(SIGN_TIMEOUT_MILLIS){
+        val signDone =withTimeoutOrNull(config.signTimeout){
             agent!!.startSigningSession(signId.toInt(),data, byteArrayOf(), agentSendChannel,agentReceiveChannel)
         }
         if (signDone == null){
@@ -510,8 +478,6 @@ class FrostManager(
             delay(1000)
         }
         state = FrostState.ReadyForSign
-        // wait for a second to allow for buffers to clear
-        delay(1000)
         cancel()
 
     }
@@ -540,7 +506,6 @@ class FrostManager(
         val mutex = Mutex(true)
         val commitmentCbId = addKeyGenCommitmentsCallbacks{ peer, msg ->
             launch {
-//                delay(200)
                 if (!isNew && mutex.isLocked)
                     mutex.unlock()
                 agentSendChannel.send(SchnorrAgentMessage.KeyCommitment(msg.byteArray,getIndex(peer.mid)))
@@ -548,7 +513,6 @@ class FrostManager(
         }
         val shareCbId = addKeyGenShareCallback { peer, keyGenShare ->
             launch {
-//                delay(200)
                 agentSendChannel.send(SchnorrAgentMessage.DkgShare(keyGenShare.byteArray,getIndex(peer.mid)))
             }
         }
@@ -568,6 +532,7 @@ class FrostManager(
         }
         val semaphoreMaxPermits = midsOfNewGroup.size
         val sendSemaphore = Semaphore(semaphoreMaxPermits,)
+        val doneSignal = Mutex(true)
         launch {
             for (agentOutput in agentReceiveChannel) {
 //                Log.d("FROST", "sending $agentOutput")
@@ -598,36 +563,7 @@ class FrostManager(
                     }
                     is SchnorrAgentOutput.KeyGenDone -> {
                         updatesChannel.emit(Update.KeyGenDone(agentOutput.pubkey.toHex()))
-                        while (sendSemaphore.availablePermits != semaphoreMaxPermits){
-                            delay(1000)
-                        }
-                        this@FrostManager.frostInfo = FrostGroup(
-                            (midsOfNewGroup.filter { it != networkManager.getMyPeer().mid }).map {
-                                FrostMemberInfo(
-                                    it,
-                                    getIndex(it)
-                                )
-                            },
-                            index,
-                            threshold = midsOfNewGroup.size / 2 + 1
-                        )
-
-                        dbMe = dbMe.copy(
-                            frostKeyShare = agent!!.keyWrapper.serialize(),
-                            frostMembers = midsOfNewGroup.filter { it != networkManager.getMyPeer().mid }.map {
-                                "$it#${frostInfo!!.getIndex(it)}"
-                            },
-                            frostN = midsOfNewGroup.size,
-                            frostIndex = index,
-                            frostThresholod = midsOfNewGroup.size / 2 + 1
-                        )
-
-                        db.meDao()
-                            .insert(dbMe)
-
-                        state = FrostState.ReadyForSign
-                        //cancel when done
-                        cancel()
+                        doneSignal.unlock()
                     }
                     else -> {
                         error("RCEIVED OUTPUT FOR SIGNING WHILE DOING KEYGEN. SHOULD NOT HAPPEN")
@@ -636,62 +572,90 @@ class FrostManager(
             }
         }
         if(!isNew){
-            val receivedSignal = withTimeoutOrNull(WAIT_FOR_KEYGEN_TIMEOUT_MILLIS){
+            val receivedSignal = withTimeoutOrNull(config.waitForKeygenResponseTimeout){
                 mutex.lock()
             }
             // we did not receive signal to start before timeout
             if (receivedSignal == null){
-//                state = FrostState.ReadyForKeyGen
-//                scope.launch {
-//                    updatesChannel.emit(Update.TimeOut(id))
-//                }
-//                cancel()
                 fail()
             }
         }
-        val keygenDone = withTimeoutOrNull(KEYGEN_TIMEOUT_MILLIS){
+        val keygenDone = withTimeoutOrNull(config.keygenTimeout){
             agent!!.startKeygen()
         }
 
         //timeout without being done
         if(keygenDone == null){
-//            scope.launch {
-//                updatesChannel.emit(Update.TimeOut(id))
-//            }
-//            state = if(isNew){
-//                FrostState.ReadyForKeyGen
-//            }else{
-//                FrostState.ReadyForSign
-//            }
-//            cancel()
             fail()
         }
 
+        // use mutex to signal that last we received the last FROST message
+        // without this, we could not receive that message in this function, and then the ui won't be updated
+        // todo clean it up. We can probably make it so the signal is not necessary
+        doneSignal.lock()
+
+        // this waits until we sent all our messages and have received acks for them.
+        //todo maybe this needs a timeout
+        while (sendSemaphore.availablePermits != semaphoreMaxPermits){
+            delay(1000)
+        }
+        this@FrostManager.frostInfo = FrostGroup(
+            (midsOfNewGroup.filter { it != networkManager.getMyPeer().mid }).map {
+                FrostMemberInfo(
+                    it,
+                    getIndex(it)
+                )
+            },
+            index,
+            threshold = midsOfNewGroup.size / 2 + 1
+        )
+
+        dbMe = dbMe.copy(
+            frostKeyShare = agent!!.keyWrapper.serialize(),
+            frostMembers = midsOfNewGroup.filter { it != networkManager.getMyPeer().mid }.map {
+                "$it#${frostInfo!!.getIndex(it)}"
+            },
+            frostN = midsOfNewGroup.size,
+            frostIndex = index,
+            frostThresholod = midsOfNewGroup.size / 2 + 1
+        )
+
+        db.meDao()
+            .insert(dbMe)
+
+        state = FrostState.ReadyForSign
+        //cancel when done
+        cancel()
 
 
     }
-    suspend fun joinGroup(){
+    suspend fun joinGroup(peer: Peer){
         joinId = Random.nextLong()
-        joining = true
-        if (!(state == FrostState.NotReady || state == FrostState.ReadyForKeyGen)) {
+        if (state != FrostState.ReadyForKeyGen) {
             return
         }
         state = FrostState.ProposedJoin(joinId)
         updatesChannel.emit(Update.ProposedKeyGen(joinId))
 
+        // start waiting for responses before sending msg
+        val peersInGroupAsync = scope.async {
+            withTimeoutOrNull(config.waitForKeygenResponseTimeout){
+                waitForJoinResponse(joinId)
+            }
+        }
         val okDeferred = scope.async(Dispatchers.Default) {
             // delay to start waiting before sending msg
-            delay(1000)
-            networkManager.broadcast(RequestToJoinMessage(joinId))
-        }
-        val peersInGroup = withTimeoutOrNull(WAIT_FOR_KEYGEN_TIMEOUT_MILLIS ){
-            waitForJoinResponse(joinId)
+            delay(10)
+            networkManager.send(peer, RequestToJoinMessage(joinId))
         }
 
-        // in this case, we have not received enough confirmations of peeers before timing out.
-        // or messages were dropped
         val (ok, amountDropped) = okDeferred.await()
         addDroppedMsgs(amountDropped)
+
+        val peersInGroup = peersInGroupAsync.await()
+
+        // in this case, we have not received enough confirmations of peers before timing out.
+        // or messages were dropped
         if (peersInGroup == null || !ok){
             scope.launch {
                 updatesChannel.emit(Update.TimeOut(joinId))
@@ -704,7 +668,7 @@ class FrostManager(
         Log.i("FROST","started keygen")
     }
 
-    private suspend fun waitForJoinResponse(id: Long): List<Peer> {
+    private suspend fun  waitForJoinResponse(id: Long): List<Peer> {
         var counter = 0
         val mutex = Mutex(true)
         val peers = mutableListOf<Peer>()
@@ -725,7 +689,7 @@ class FrostManager(
         return peers
     }
 
-    suspend fun processMsg(pair: Pair<Peer, FrostMessage>) {
+    private suspend fun processMsg(pair: Pair<Peer, FrostMessage>) {
         val (peer, msg) = pair
         Log.d("FROST","received msg $msg")
         msgProcessMap[msg::class]?.let { it(peer, msg) }
@@ -840,9 +804,6 @@ class FrostManager(
             FrostState.ReadyForSign -> {
                 scope.launch {
                     updatesChannel.emit(Update.SignRequestReceived(msg.id, peer.mid, msg.data))
-//                    updatesChannel.emit(Update.TextUpdate("startet sign"))
-//                    networkManager.send(peer,SignRequestResponse(msg.id,true))
-//                    startSign(msg.id,msg.data)
                 }
             }
                 else -> {}
@@ -855,11 +816,24 @@ class FrostManager(
     }
 
     companion object{
-        const val SIGN_TIMEOUT_MILLIS = 10 * 60 * 1000L
-        const val KEYGEN_TIMEOUT_MILLIS = 10 * 60 * 1000L
-        const val WAIT_FOR_KEYGEN_TIMEOUT_MILLIS = 5 * 60 * 1000L
-        const val WAIT_FOR_INITIAL_PREPROCESS_MILLIS = 5 * 60 * 1000L
-        // const val timeout ...
+        val defaultConfig = FrostManagerConfig(
+            signTimeout = (10 * 60 * 1000).milliseconds,
+            waitForSignResponseTimeout = (5 * 60 * 1000).milliseconds,
+            keygenTimeout = (10 * 60 * 1000).milliseconds,
+            waitForKeygenResponseTimeout = (5 * 60 * 1000).milliseconds,
+            waitForInitialPreprocessTimeout = (5 * 60 * 1000).milliseconds
+        )
+//        const val SIGN_TIMEOUT_MILLIS = 10 * 60 * 1000L
+//        const val KEYGEN_TIMEOUT_MILLIS = 10 * 60 * 1000L
+//        const val WAIT_FOR_KEYGEN_TIMEOUT_MILLIS = 5 * 60 * 1000L
+//        const val WAIT_FOR_INITIAL_PREPROCESS_MILLIS = 5 * 60 * 1000L
     }
 
 }
+data class FrostManagerConfig(
+    val signTimeout: Duration,
+    val waitForSignResponseTimeout: Duration,
+    val keygenTimeout: Duration,
+    val waitForKeygenResponseTimeout: Duration,
+    val waitForInitialPreprocessTimeout: Duration
+)

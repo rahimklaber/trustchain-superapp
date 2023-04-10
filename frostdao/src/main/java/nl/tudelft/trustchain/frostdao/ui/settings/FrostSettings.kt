@@ -69,7 +69,7 @@ class FrostSettings : Fragment() {
                         ){
                             Button(onClick = {
                                 frostViewModel.viewModelScope.launch(Dispatchers.Default) {
-                                    frostViewModel.frostManager.joinGroup()
+                                    frostViewModel.joinFrost()
                                 }
                             }) {
                                 Text(text = "Join Group")

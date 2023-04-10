@@ -5,6 +5,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import nl.tudelft.trustchain.frostdao.database.FrostDatabase
 import nl.tudelft.ipv8.Community
 import nl.tudelft.ipv8.Peer
@@ -38,8 +40,8 @@ class FrostCommunity: Community() {
     override val serviceId: String
         get() = "5ce0aab9123b60537030b1312783a0ebcf5fd92f"
 
-    private val _channel = MutableSharedFlow<Pair<Peer, FrostMessage>>(extraBufferCapacity = 10000) //todo check this
-    private val _filteredChannel = MutableSharedFlow<Pair<Peer, FrostMessage>>(extraBufferCapacity = 10000)
+    private val _channel = MutableSharedFlow<Pair<Peer, FrostMessage>>(extraBufferCapacity = 100) //todo check this
+    private val _filteredChannel = MutableSharedFlow<Pair<Peer, FrostMessage>>(extraBufferCapacity = 100)
     val channel = _filteredChannel.asSharedFlow()
 
     val lastResponseFrom = mutableMapOf<String,Date>()
@@ -54,75 +56,76 @@ class FrostCommunity: Community() {
         this.db = db
     }
 
+    // store that we received a msg.
+    // (mid,hash) -> Boolean
+    //todo use set instead?
+    private val sent = mutableMapOf<Pair<String,Int>,Boolean>()
+    private val received  = mutableMapOf<Pair<String,Int>,Boolean>()
+
     private var onAckCbId = 0;
     private val onAckCallbacks= mutableMapOf<Int,suspend (peer: Peer,ack: Ack)->Unit>()
+    private val ackCbMutex = Mutex()
     //todo, check if we need to lock
-    fun addOnAck(cb: suspend (peer: Peer,ack: Ack)->Unit) : Int{
-       val id = onAckCbId++;
-       onAckCallbacks[id]  = cb
-        return id
+    suspend fun addOnAck(cb: suspend (peer: Peer,ack: Ack)->Unit) : Int{
+       return ackCbMutex.withLock {
+           val id = onAckCbId++
+           onAckCallbacks[id]  = cb
+           id
+       }
     }
 
-    fun removeOnAck(id: Int){
-        onAckCallbacks.remove(id)
+    suspend fun removeOnAck(id: Int){
+        ackCbMutex.withLock {
+            onAckCallbacks.remove(id)
+        }
     }
 
     init {
-
-        //todo maybe deserialize
+        //todo reduce code duplication?
         messageHandlers[RequestToJoinMessage.MESSAGE_ID] = { packet ->
             val pair = packet.getAuthPayload(RequestToJoinMessage.Deserializer)
-//            error("received ${pair.second}")
-            //todo check this
             scope.launch {
                 _channel.emit(pair)
             }
         }
         messageHandlers[RequestToJoinResponseMessage.MESSAGE_ID] = { packet ->
             val pair = packet.getAuthPayload(RequestToJoinResponseMessage.Deserializer)
-            //todo check this
             scope.launch {
                 _channel.emit(pair)
             }
         }
         messageHandlers[KeyGenCommitments.MESSAGE_ID] = { packet ->
             val pair = packet.getAuthPayload(KeyGenCommitments.Deserializer)
-            //todo check this
             scope.launch {
                 _channel.emit(pair)
             }
         }
         messageHandlers[KeyGenShare.MESSAGE_ID] = { packet ->
             val pair = packet.getAuthPayload(KeyGenShare.Deserializer)
-            //todo check this
             scope.launch {
                 _channel.emit(pair)
             }
         }
         messageHandlers[Preprocess.MESSAGE_ID] = { packet ->
             val pair = packet.getAuthPayload(Preprocess.Deserializer)
-            //todo check this
             scope.launch {
                 _channel.emit(pair)
             }
         }
         messageHandlers[SignShare.MESSAGE_ID] = { packet ->
             val pair = packet.getAuthPayload(SignShare.Deserializer)
-            //todo check this
             scope.launch {
                 _channel.emit(pair)
             }
         }
         messageHandlers[SignRequest.MESSAGE_ID] = { packet ->
             val pair = packet.getAuthPayload(SignRequest.Deserializer)
-            //todo check this
             scope.launch {
                 _channel.emit(pair)
             }
         }
         messageHandlers[SignRequestResponse.MESSAGE_ID] = { packet ->
             val pair = packet.getAuthPayload(SignRequestResponse.Deserializer)
-            //todo check this
             scope.launch(Dispatchers.Default) {
                 _channel.emit(pair)
             }
@@ -130,7 +133,6 @@ class FrostCommunity: Community() {
         }
         messageHandlers[GossipRequest.MESSAGE_ID] = { packet ->
             val (peer,msg) = packet.getAuthPayload(GossipRequest.Deserializer)
-            //todo check this
             scope.launch(Dispatchers.Default) {
                 db.requestDao()
                     .getNotDoneAndReceivedAfterTime(msg.afterUnixTime.toInt())
@@ -224,23 +226,26 @@ class FrostCommunity: Community() {
     }
 
 
-    // store that we received a msg.
-    // (mid,hash) -> Boolean
-    val sent = mutableMapOf<Pair<String,Int>,Boolean>()
-    val received  = mutableMapOf<Pair<String,Int>,Boolean>()
-    // better name lol
-    fun sendForPublic(peer: Peer, msg: FrostMessage) {
+
+    fun send(peer: Peer, msg: FrostMessage) {
 //        Log.d("FROST", "sending msg $msg in community")
         val id = messageIdFromMsg(msg)
         val packet = serializePacket(id,msg)
-//        scope.launch(Dispatchers.Default) {
-//            repeat(10){
-//
-//            }
-//        }
-        send(peer,packet)
+
+        if(msg.serialize().size < 1300){
+            send(peer,packet)
+        }else{
+            sendEva(peer,msg)
+        }
+
         sent[peer.mid to msg.hashCode()] = true
 
+    }
+
+    fun sendEva (peer: Peer, msg: FrostMessage){
+        val id = messageIdFromMsg(msg)
+        val packet = listOf(id.toByte()) + serializePacket(id,msg).toList()
+        evaSendBinary(peer, EVA_FROST_DAO_attachment,"${msg.id}$id",packet.toByteArray())
     }
 
     fun sendProposalStatusRequest(peer: Peer ,request: ProposalStatusRequest){
@@ -248,25 +253,10 @@ class FrostCommunity: Community() {
         send(peer,packet)
     }
 
-    fun sendAck(peer: Peer,ack: Ack){
+    private fun sendAck(peer: Peer,ack: Ack){
         val packet = serializePacket(Ack.MESSAGE_ID,ack)
         send(peer,packet)
     }
-
-
-    fun broadcast(msg : FrostMessage){
-        //todo fix this
-
-        val packet = serializePacket(messageIdFromMsg(msg),msg)
-        for (peer in getPeers()) {
-           scope.launch(Dispatchers.Default) {
-                   send(peer,packet)
-           }
-            sent[peer.mid to msg.hashCode()] = true
-        }
-    }
-
-
 
     companion object {
         const val EVA_FROST_DAO_attachment = "eva_frost_attachment"

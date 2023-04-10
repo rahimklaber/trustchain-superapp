@@ -222,10 +222,17 @@ class FrostViewModel(
         threshold = frostManager.frostInfo?.threshold
         amountDropped = frostManager.droppedMsgs
     }
-    fun joinFrost(){
-        viewModelScope.launch(Dispatchers.Default){
-            frostManager.joinGroup()
-        }
+
+    /**
+     * request to join a peer that is active
+     */
+    suspend fun joinFrost(){
+        val peer = lastHeardFrom.filter {
+            it.value < 10_000
+        }.firstNotNullOfOrNull { frostManager.networkManager.getPeerFromMid(it.key) } ?: return
+        frostManager.joinGroup(
+            peer
+        )
     }
 
     suspend fun proposeSign(data: ByteArray){
