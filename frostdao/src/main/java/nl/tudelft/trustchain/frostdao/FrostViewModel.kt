@@ -9,12 +9,20 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.launch
+import nl.tudelft.ipv8.util.hexToBytes
+import nl.tudelft.ipv8.util.toHex
+import nl.tudelft.trustchain.frostdao.bitcoin.BitcoinService
 import nl.tudelft.trustchain.frostdao.ipv8.FrostCommunity
 import nl.tudelft.trustchain.frostdao.ipv8.FrostManager
 import nl.tudelft.trustchain.frostdao.ipv8.FrostState
 import nl.tudelft.trustchain.frostdao.ipv8.Update
 import nl.tudelft.trustchain.frostdao.ipv8.message.RequestToJoinMessage
 import nl.tudelft.trustchain.frostdao.ipv8.message.SignRequest
+import nl.tudelft.trustchain.frostdao.ipv8.message.SignRequestBitcoin
+import org.bitcoinj.core.Address
+import org.bitcoinj.core.Coin
+import org.bitcoinj.core.Transaction
+import org.bitcoinj.core.TransactionWitness
 import java.util.*
 
 enum class ProposalState {
@@ -32,15 +40,27 @@ sealed interface Proposal{
     fun type() : String
 }
 
+
 data class SignProposal(
     override val id: Long,
     override val fromMid: String,
     val msg: ByteArray,
-    val signed: Boolean = false,
-    val signatureHex: String = "",
+    var signed: Boolean = false,
+    var signatureHex: String = "",
     override var state: ProposalState = ProposalState.Started
 ) : Proposal {
     override fun type(): String = "Sign"
+}
+
+data class BitcoinProposal(
+    override val id: Long,
+    override val fromMid: String,
+    val transaction: Transaction,
+    var done: Boolean = false,
+    override var state: ProposalState = ProposalState.Started
+
+) : Proposal {
+    override fun type(): String = "Bitcoin"
 }
 
 data class JoinProposal(
@@ -65,7 +85,8 @@ enum class FrostPeerStatus(val color: Color) {
 class FrostViewModel(
     val frostCommunity: FrostCommunity,
     val frostManager: FrostManager,
-    val toastMaker : (String) -> Unit
+    val bitcoinService: BitcoinService,
+    val toastMaker : (String) -> Unit,
 ) : ViewModel() {
     var state by mutableStateOf(frostManager.state)
     var index by mutableStateOf(frostManager.frostInfo?.myIndex)
@@ -83,9 +104,36 @@ class FrostViewModel(
     val stateMap = mutableStateMapOf<String, FrostPeerStatus>()
     //unix time when we last heard from
     val lastHeardFrom = mutableStateMapOf<String,Long>()
-    init {
-        viewModelScope.launch(Dispatchers.Default) {
 
+
+    var bitcoinNumPeers by mutableStateOf(0)
+    var bitcoinBalance by mutableStateOf("0")
+    var bitcoinAddress by mutableStateOf<String?>(null)
+
+    var bitcoinDaoAddress by mutableStateOf<Address?>(null)
+    var bitcoinDaoBalance by mutableStateOf<String?>(null)
+    init {
+        frostManager.initBitcoin(bitcoinService)
+        viewModelScope.launch(Dispatchers.Default) {
+            launch {
+                while(true){
+                    delay(5000)
+                    if (bitcoinService.kit.isRunning){
+
+                        val amountOfPeers = bitcoinService.kit.peerGroup().numConnectedPeers()
+                        Log.d("FROST","Bitcoin address ${bitcoinService.personalAddress}")
+                        if (bitcoinAddress == null){
+                            bitcoinAddress = bitcoinService.personalAddress.toString()
+                        }
+                        bitcoinNumPeers = amountOfPeers
+                        bitcoinBalance = bitcoinService.kit.wallet().balance.toFriendlyString()
+                        bitcoinDaoAddress?.let {
+                            bitcoinDaoBalance = bitcoinService.getBalanceForTrackedAddress(it).toFriendlyString()
+                        }
+                    }
+
+                }
+            }
             launch {
                 while (true){
                     delay(5000)
@@ -132,6 +180,10 @@ class FrostViewModel(
                             is SignRequest -> {
                                 proposals.add(SignProposal((it.second as SignRequest).id,it.first.mid, (it.second as SignRequest).data))
                             }
+                            is SignRequestBitcoin -> {
+                                //todo
+                                proposals.add(BitcoinProposal(it.second.id,it.first.mid, Transaction(bitcoinService.networkParams, (it.second as SignRequestBitcoin).tx)))
+                            }
                             else -> Unit
                         }
                     }
@@ -139,7 +191,13 @@ class FrostViewModel(
             frostManager.updatesChannel.collect{
                 Log.d("FROST","received msg in viewmodel : $it")
                 when(it){
-                    is Update.KeyGenDone, is Update.StartedKeyGen, is Update.ProposedKeyGen-> {
+                    is Update.KeyGenDone -> {
+                        refreshFrostData()
+                        bitcoinDaoAddress = bitcoinService.taprootPubKeyToAddress(it.pubkey)
+                        bitcoinDaoAddress?.let(bitcoinService::trackAddress)
+                        Log.d("FROST","Bitcoin DAO address: $bitcoinDaoAddress")
+                    }
+                    is Update.StartedKeyGen, is Update.ProposedKeyGen-> {
                         refreshFrostData()
                     }
                     is Update.TextUpdate -> {
@@ -154,55 +212,45 @@ class FrostViewModel(
                             proposals.add(prop)
                         }
                     }
+                    is Update.BitcoinSignRequestReceived -> {
+                        val prop = BitcoinProposal(it.id, it.fromMid, it.transaction)
+                        val found = proposals.find {checkprop ->
+                            checkprop is BitcoinProposal && checkprop.id == prop.id
+                        }
+                        if (found == null){
+                            proposals.add(prop)
+                        }
+                    }
                     is Update.SignDone -> {
                         refreshFrostData()
                         val update = it
                         val foundInMyProps = myProposals.find { prop ->
-                            if(prop is SignProposal){
                                 prop.id == update.id
-                            }else{
-                                false
+                        }
+                        if (foundInMyProps is SignProposal){
+                            foundInMyProps.signatureHex = update.signature
+                            foundInMyProps.signed = true
+                            return@collect
+                        }else if(foundInMyProps is BitcoinProposal){
+                            foundInMyProps.done = true
+                            foundInMyProps.transaction.inputs[0].witness =TransactionWitness(1).also { witness ->
+                               witness.setPush(0,it.signature.hexToBytes())
                             }
-                        } as SignProposal?
-                        if (foundInMyProps != null){
-                            myProposals.removeIf { prop ->
-                                if(prop is SignProposal){
-                                prop.id == update.id
-                            }else{
-                                false
-                                }
-                            }
-                            myProposals.add(
-                                foundInMyProps.copy(
-                                    signed = true,
-                                    signatureHex = update.signature
-                                )
-                            )
+                            Log.d("Bitcoin", "Signed tx: ${foundInMyProps.transaction.bitcoinSerialize().toHex()}")
+                            toastMaker("SIGNED BITCOIN")
                             return@collect
                         }
 
                         val foundInProps = proposals.find { prop ->
-                            if(prop is SignProposal){
                                 prop.id == update.id
-                            }else{
-                                false
-                            }
-                        } as SignProposal?
+                        }
 
-                        if (foundInProps != null){
-                            proposals.removeIf { prop ->
-                                if(prop is SignProposal){
-                                    prop.id == update.id
-                                }else{
-                                    false
-                                }
-                            }
-                            proposals.add(
-                                foundInProps.copy(
-                                    signed = true,
-                                    signatureHex = update.signature
-                                )
-                            )
+                        if (foundInProps is SignProposal){
+                            foundInProps.signatureHex = update.signature
+                            foundInProps.signed = true
+                        }else if(foundInProps is BitcoinProposal){
+                            foundInProps.done = true
+                            toastMaker("SIGNED BITCOIN")
                         }
                     }
                     is Update.TimeOut -> {
@@ -227,16 +275,20 @@ class FrostViewModel(
      * request to join a peer that is active
      */
     suspend fun joinFrost(){
+        Log.d("FROST","joingroup function called ")
+        val currTime = Date().time/1000
         val peer = lastHeardFrom.filter {
-            it.value < 10_000
+            // peers that we heard from at most 60 secs ago
+            it.value + 60 > currTime
         }.firstNotNullOfOrNull { frostManager.networkManager.getPeerFromMid(it.key) } ?: return
+        Log.d("FROST","Joining group ")
         frostManager.joinGroup(
             peer
         )
     }
 
     suspend fun proposeSign(data: ByteArray){
-        val (ok, id) = frostManager.proposeSignAsync(data)
+        val (ok, id) = frostManager.proposeSignAsync(FrostManager.SignParams.Test(data))
         if (!ok){
             Log.d("FROST", "Failed to create sign proposal")
             return
@@ -245,11 +297,24 @@ class FrostViewModel(
 
     }
 
+    suspend fun proposeSignBitcoin(amount: Long, recipient: String){
+        if(bitcoinDaoAddress == null){
+            toastMaker("Bitcoin Dao address not available.")
+            return
+        }
+        val tx = bitcoinService.createSendTransactionForDaoAccount(bitcoinDaoAddress!!, Coin.valueOf(amount), Address.fromString(bitcoinService.networkParams,recipient))
+        if (tx.isSuccess){
+            val (ok, id) = frostManager.proposeSignAsync(FrostManager.SignParams.Bitcoin(tx.getOrThrow()))
+        }else{
+            toastMaker("could not create bitcoin transaction")
+        }
+    }
+
     suspend fun acceptSign(id: Long){
         val prop = proposals
             .find {
-                it is SignProposal && it.id == id
-            } as SignProposal?
+                it is BitcoinProposal && it.id == id
+            } as BitcoinProposal?
 
         if(prop == null){
             Log.d("FROST", "cold not accept sign proposal. We could not find a proposal with this id")
@@ -270,7 +335,7 @@ class FrostViewModel(
             }
         }
 
-        frostManager.acceptProposedSign(prop.id,prop.fromMid,prop.msg)
+        frostManager.acceptProposedSign(prop.id,prop.fromMid,FrostManager.SignParams.Bitcoin(prop.transaction))
     }
 
     // remove ongong actions

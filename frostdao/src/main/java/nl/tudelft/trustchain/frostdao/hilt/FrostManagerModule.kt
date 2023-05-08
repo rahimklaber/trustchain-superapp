@@ -25,6 +25,7 @@ import nl.tudelft.trustchain.frostdao.ipv8.message.SignRequest
 import nl.tudelft.trustchain.frostdao.ipv8.message.messageIdFromMsg
 import nl.tudelft.ipv8.Peer
 import nl.tudelft.ipv8.android.IPv8Android
+import nl.tudelft.trustchain.frostdao.bitcoin.BitcoinService
 import java.util.Date
 import javax.inject.Singleton
 
@@ -201,7 +202,7 @@ object FrostManagerModule {
 
             },
         )
-        return FrostViewModel(frostCommunity,frostManager){
+        return FrostViewModel(frostCommunity,frostManager, BitcoinService(app.dataDir)){
             GlobalScope.launch(Dispatchers.Main) {
                 Toast.makeText(app,it,Toast.LENGTH_LONG).show()
             }

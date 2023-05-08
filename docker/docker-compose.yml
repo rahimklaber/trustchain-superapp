@@ -15,7 +15,7 @@ services:
       - "--http.addr=0.0.0.0"
   bitcoin:
     container_name: trustchain-superapp-bitcoin-node
-    image: ruimarinho/bitcoin-core:22-alpine
+    image: ruimarinho/bitcoin-core:23-alpine
     ports:
       - "18444:18444"
     volumes:
@@ -26,7 +26,7 @@ services:
       - "--peerbloomfilters"
       - "--txindex"
       - "--acceptnonstdtxn"
-      - "--disablewallet"
+#      - "--disablewallet"
 
 volumes:
   ethereum_data:

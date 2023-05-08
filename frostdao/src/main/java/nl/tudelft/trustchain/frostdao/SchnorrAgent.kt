@@ -8,6 +8,7 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import nl.tudelft.ipv8.util.toHex
+import org.bitcoinj.core.Transaction
 
 sealed interface SchnorrAgentMessage{
     data class KeyCommitment(val commitment: ByteArray, val fromIndex: Int) : SchnorrAgentMessage
@@ -64,10 +65,6 @@ class SchnorrAgent(
         val param_keygen_3_msgs = mutableListOf<SchnorrAgentMessage.DkgShare>()
         val notification1Mutex = Mutex(true)
         val notification2Mutex = Mutex(true)
-        fun clearMsgs(){
-            param_keygen_2_msgs.clear()
-            param_keygen_3_msgs.clear()
-        }
 
         val msgHandlerJob = launch {
             var keycommitmentReceived = 0
@@ -135,7 +132,9 @@ class SchnorrAgent(
         outputChannel.send(SchnorrAgentOutput.KeyGenDone(index, keyWrapper._bitcoin_encoded_key))
     }
 
-    suspend fun startSigningSession(sessionId: Int, msg: ByteArray, prevoutScript: ByteArray,
+    data class PrevOut(val script: ByteArray, val amount: Long)
+    data class BitcoinParams(val transaction: Transaction)
+    suspend fun startSigningSession(sessionId: Int, msg: ByteArray?, bitcoinParams: BitcoinParams?,
                                     receiveChannel: ReceiveChannel<SchnorrAgentMessage>,
                                     outputChannel: SendChannel<SchnorrAgentOutput>
                                     ) = coroutineScope{
@@ -185,8 +184,15 @@ class SchnorrAgent(
             params_sign_2.add_commitment_from_user(from,bytes)
         }
 
-        val res_sign_2 = SchnorrSignWrapper.sign_2_sign_normal(signWrapper,params_sign_2, msg)
-//        val res_sign_2 = SchnorrSignWrapper.sign_2_sign(signWrapper,params_sign_2, msg,prevoutScript)
+//        val res_sign_2 = SchnorrSignWrapper.sign_2_sign_normal(signWrapper,params_sign_2, msg)
+        val res_sign_2 = if(bitcoinParams == null){
+            SchnorrSignWrapper.sign_2_sign_normal(signWrapper,params_sign_2, msg)
+        }else{
+            val scriptContainer = ScriptContainer()
+            val input = bitcoinParams.transaction.inputs[0]
+            scriptContainer.add_script(input.value!!.value,input.scriptBytes)
+            SchnorrSignWrapper.sign_2_sign_bitcoin(signWrapper,params_sign_2, bitcoinParams.transaction.bitcoinSerialize(),scriptContainer)
+        }
 
         val share = res_sign_2._share
         signWrapper = SignResult2.get_wrapper(res_sign_2)

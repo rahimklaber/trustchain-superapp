@@ -50,8 +50,10 @@ android {
 }
 
 dependencies {
-    implementation project(":common")
+//    implementation project(":common")
+//    implementation project(":common-bitcoin")
     implementation project(":ipv8-android")
+    implementation("org.bitcoinj:bitcoinj-core:0.16.2")
 
     testImplementation project(":ipv8-jvm")
     testImplementation "io.mockk:mockk:1.13.4"

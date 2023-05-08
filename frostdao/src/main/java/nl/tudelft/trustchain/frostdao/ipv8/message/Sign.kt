@@ -86,6 +86,47 @@ data class SignShare(override val id: Long, val bytes: ByteArray) : FrostMessage
     }
 }
 
+/**
+ * todo: Ok so I need the tx hash, the index of the output I want to use as input, the recipient of the send and the amount we are sending
+ */
+
+data class SignRequestBitcoin(override val id: Long, val tx: ByteArray): FrostMessage {
+    override fun serialize(): ByteArray {
+        return "$id#${tx.toHex()}".encodeToByteArray()
+    }
+
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (javaClass != other?.javaClass) return false
+
+        other as SignRequestBitcoin
+
+        if (id != other.id) return false
+        return tx.contentEquals(other.tx)
+    }
+
+    override fun hashCode(): Int {
+        var result = id.hashCode()
+        result = 31 * result + tx.contentHashCode()
+        return result
+    }
+
+    companion object Deserializer : Deserializable<SignRequestBitcoin> {
+        const val MESSAGE_ID = 15
+        override fun deserialize(buffer: ByteArray, offset: Int): Pair<SignRequestBitcoin, Int> {
+            val (idstr, txHex) = buffer.slice(offset until  buffer.size)
+                .toByteArray()
+                .toString(Charsets.UTF_8)
+                .split("#")
+            return SignRequestBitcoin(
+                idstr.toLong(),
+                txHex.hexToBytes()
+            ) to buffer.size
+        }
+    }
+
+}
+
 data class SignRequest(override val id: Long, val data: ByteArray) : FrostMessage {
     override fun serialize(): ByteArray {
         return "$id#${data.toHex()}".toByteArray(Charsets.UTF_8)

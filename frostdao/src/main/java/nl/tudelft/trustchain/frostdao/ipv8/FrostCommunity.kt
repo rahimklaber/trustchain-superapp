@@ -124,6 +124,12 @@ class FrostCommunity: Community() {
                 _channel.emit(pair)
             }
         }
+        messageHandlers[SignRequestBitcoin.MESSAGE_ID] = { packet ->
+            val pair = packet.getAuthPayload(SignRequestBitcoin.Deserializer)
+            scope.launch {
+                _channel.emit(pair)
+            }
+        }
         messageHandlers[SignRequestResponse.MESSAGE_ID] = { packet ->
             val pair = packet.getAuthPayload(SignRequestResponse.Deserializer)
             scope.launch(Dispatchers.Default) {

@@ -1,6 +1,7 @@
 package nl.tudelft.trustchain.frostdao.ui.settings
 
 import android.os.Bundle
+import android.util.Log
 import androidx.fragment.app.Fragment
 import android.view.LayoutInflater
 import android.view.View
@@ -9,9 +10,11 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material3.Button
-import androidx.compose.material3.Divider
-import androidx.compose.material3.Text
+import androidx.compose.material3.*
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.ComposeView
@@ -23,6 +26,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import nl.tudelft.trustchain.frostdao.FrostViewModel
 import nl.tudelft.trustchain.frostdao.ui.settings.ActivityGrid
+import org.bitcoinj.core.Coin
+import org.bitcoinj.core.SegwitAddress
+import org.bitcoinj.params.RegTestParams
 import javax.inject.Inject
 
 /**
@@ -38,6 +44,7 @@ class FrostSettings : Fragment() {
 
     }
 
+    @OptIn(ExperimentalMaterial3Api::class)
     override fun onCreateView(
         inflater: LayoutInflater, container: ViewGroup?,
         savedInstanceState: Bundle?
@@ -45,6 +52,7 @@ class FrostSettings : Fragment() {
         // Inflate the layout for this fragment
         return ComposeView(requireContext()).apply {
             setContent {
+                var senAddress by remember{ mutableStateOf("") }
                 Box(
                     Modifier
                         .fillMaxSize()///
@@ -57,6 +65,29 @@ class FrostSettings : Fragment() {
                         Text("Amount of dropped messages: ${frostViewModel.amountDropped}",fontSize = 16.sp)
                         Divider(thickness = 2.dp)
                         Text("Peers")
+                        Column(Modifier.padding(horizontal = 4.dp)){
+                            Text("Bitcoin amount peers: ${frostViewModel.bitcoinNumPeers}")
+                            Text("Bitcoin Address: ${frostViewModel.bitcoinAddress}")
+                            Text("Bitcoin balance: ${frostViewModel.bitcoinBalance}")
+
+                            Text("Bitcoin Dao Address: ${frostViewModel.bitcoinDaoAddress}")
+                            Text("Bitcoin Dao balance: ${frostViewModel.bitcoinDaoBalance}")
+
+
+                            TextField(senAddress,{senAddress = it})
+                            Button({
+                                frostViewModel.viewModelScope.launch(Dispatchers.Default) {
+                                    frostViewModel.bitcoinService.sendBtcToTaproot(
+                                        SegwitAddress.fromBech32(RegTestParams.get(),senAddress),
+                                        Coin.CENT
+                                    )
+                                }
+                            }){
+                                Text("Test send")
+                            }
+
+
+                        }
                         LazyColumn{
                             items(frostViewModel.peers){
                                 Text(it)

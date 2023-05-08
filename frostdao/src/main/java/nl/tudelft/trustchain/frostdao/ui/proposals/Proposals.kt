@@ -22,6 +22,7 @@ import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import nl.tudelft.trustchain.frostdao.BitcoinProposal
 import nl.tudelft.trustchain.frostdao.FrostViewModel
 import nl.tudelft.trustchain.frostdao.SignProposal
 import javax.inject.Inject
@@ -84,6 +85,22 @@ class Proposals : Fragment() {
                                     }
 
                                     if (!it.signed){
+                                        Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd){
+                                            Button(onClick = {
+                                                frostViewModel.viewModelScope.launch(Dispatchers.Default) {
+                                                    frostViewModel.acceptSign(it.id)
+                                                }
+                                            }) {
+                                                Text("accept")
+                                            }
+                                        }
+                                    }
+                                }else if(it is BitcoinProposal){
+                                    Column {
+                                        Text("signed: ${it.done}")
+                                    }
+
+                                    if (!it.done){
                                         Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd){
                                             Button(onClick = {
                                                 frostViewModel.viewModelScope.launch(Dispatchers.Default) {

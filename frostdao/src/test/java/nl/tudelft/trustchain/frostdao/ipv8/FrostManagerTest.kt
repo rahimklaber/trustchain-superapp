@@ -238,6 +238,7 @@ class FrostManagerTest {
         launch {
             manager2.updatesChannel.collect {
                 if (it is Update.KeyGenDone) {
+                    println(it.pubkey)
                     signal2.unlock()
                     cancel()
                 }
@@ -769,6 +770,151 @@ class FrostManagerTest {
 
         val done = withTimeoutOrNull(100) {
             signal1.lock()
+        }
+
+        Assert.assertNotNull(done)
+    }
+
+    @Test
+    fun `Signing a bitcoin transaction should work with two participants`() = runBlocking {
+        mockkStatic(Log::class)
+        every { Log.v(any(), any()) } returns 0
+        every { Log.d(any(), any()) } returns 0
+        every { Log.i(any(), any()) } returns 0
+        every { Log.e(any(), any()) } returns 0
+
+        val peer1 = Peer(JavaCryptoProvider.generateKey())
+        val peer2 = Peer(JavaCryptoProvider.generateKey())
+        val receiveChannel1 = Channel<Pair<Peer, FrostMessage>>()
+        val receiveChannel2 = Channel<Pair<Peer, FrostMessage>>()
+
+        val manager1 = run {
+            val db = mockk<FrostDatabase>(relaxed = true)
+            val medao = mockk<MeDao>(relaxed = true)
+            val messageDao = mockk<ReceivedMessageDao>(relaxed = true)
+            every { db.receivedMessageDao() } returns messageDao
+            every { db.meDao() } returns medao
+            FrostManager(
+                receiveChannel = receiveChannel1.receiveAsFlow(),
+                db = db,
+                networkManager = object : NetworkManager() {
+                    override suspend fun send(peer: Peer, msg: FrostMessage): Pair<Boolean, Int> {
+                        receiveChannel2.send(peer1 to msg)
+                        return true to 0
+                    }
+
+                    override fun getMyPeer() = peer1
+
+                    override fun getPeerFromMid(mid: String) = peer2
+
+                    override fun peers(): List<Peer> = listOf(peer2)
+
+                    override suspend fun broadcast(msg: FrostMessage, recipients: List<Peer>): Pair<Boolean, Int> {
+                        receiveChannel2.send(peer1 to msg)
+                        return true to 0
+                    }
+
+                }
+
+            )
+        }
+        val manager2 = run {
+            val db = mockk<FrostDatabase>(relaxed = true)
+            val medao = mockk<MeDao>(relaxed = true)
+            val messageDao = mockk<ReceivedMessageDao>(relaxed = true)
+            every { db.receivedMessageDao() } returns messageDao
+            every { db.meDao() } returns medao
+            FrostManager(
+                receiveChannel = receiveChannel2.receiveAsFlow(),
+                db = db,
+                networkManager = object : NetworkManager() {
+                    override suspend fun send(peer: Peer, msg: FrostMessage): Pair<Boolean, Int> {
+                        receiveChannel1.send(peer2 to msg)
+                        return true to 0
+                    }
+
+                    override fun getMyPeer() = peer2
+
+                    override fun getPeerFromMid(mid: String) = peer1
+
+                    override fun peers(): List<Peer> = listOf(peer1)
+
+                    override suspend fun broadcast(msg: FrostMessage, recipients: List<Peer>): Pair<Boolean, Int> {
+                        receiveChannel1.send(peer2 to msg)
+                        return true to 0
+                    }
+
+                }
+
+            )
+        }
+
+        val signal1 = Mutex(true)
+        val signal2 = Mutex(true)
+        launch {
+            manager1.updatesChannel.collect {
+                if (it is Update.KeyGenDone) {
+                    signal1.unlock()
+                    cancel()
+                }
+            }
+        }
+
+        launch {
+            manager2.updatesChannel.collect {
+                if (it is Update.KeyGenDone) {
+                    signal2.unlock()
+                    cancel()
+                }
+            }
+        }
+
+        manager1.joinGroup(peer2)
+
+        signal1.lock()
+        signal2.lock()
+
+        // we receive the update before the frostInfo is created
+        // todo maybe change that? Though It isn't really a problem in real life
+        delay(10)
+
+        launch {
+            manager2.updatesChannel.collect {
+                if (it is Update.SignRequestReceived) {
+                    signal2.unlock()
+                    cancel()
+                }
+            }
+        }
+
+        val signData = Random.nextBytes(32)
+
+        val (_, id) = manager1.proposeSignAsync(signData)
+        signal2.lock()
+
+        launch {
+            manager1.updatesChannel.collect {
+                if (it is Update.SignDone) {
+                    signal1.unlock()
+                    cancel()
+                }
+            }
+        }
+
+        launch {
+            manager2.updatesChannel.collect {
+                if (it is Update.SignDone) {
+                    signal2.unlock()
+                    cancel()
+                }
+            }
+        }
+
+        manager2.acceptProposedSign(id, peer1.mid, signData)
+
+        val done = withTimeoutOrNull(100) {
+            signal1.lock()
+            signal2.lock()
         }
 
         Assert.assertNotNull(done)
