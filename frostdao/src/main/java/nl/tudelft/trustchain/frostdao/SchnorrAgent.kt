@@ -81,6 +81,7 @@ class SchnorrAgent(
                     is SchnorrAgentMessage.KeyCommitment -> {
 //                        Log.d("FROST","enought commitments")
                         param_keygen_2_msgs.add(msg)
+                        Log.d("FROST", "received commitment from index : ${msg.fromIndex}, our index : ${index}")
 
                         keycommitmentReceived++
                         if (keycommitmentReceived == numberOfParticipants - 1)
@@ -95,7 +96,7 @@ class SchnorrAgent(
         //use mutex as a semaphore?? basically to signal that we have enough commitments
         notification1Mutex.lock()
         val param_keygen_2 = ParamsKeygen2()
-
+        Log.d("FROST", "Creating shares")
         param_keygen_2_msgs.forEach {
             val (bytes,from) = it
             param_keygen_2.add_commitment_from_user(from,bytes)
@@ -133,7 +134,7 @@ class SchnorrAgent(
     }
 
     data class PrevOut(val script: ByteArray, val amount: Long)
-    data class BitcoinParams(val transaction: Transaction)
+    data class BitcoinParams(val transaction: Transaction, val value: Long)
     suspend fun startSigningSession(sessionId: Int, msg: ByteArray?, bitcoinParams: BitcoinParams?,
                                     receiveChannel: ReceiveChannel<SchnorrAgentMessage>,
                                     outputChannel: SendChannel<SchnorrAgentOutput>
@@ -190,7 +191,7 @@ class SchnorrAgent(
         }else{
             val scriptContainer = ScriptContainer()
             val input = bitcoinParams.transaction.inputs[0]
-            scriptContainer.add_script(input.value!!.value,input.scriptBytes)
+            scriptContainer.add_script(bitcoinParams.value,input.scriptBytes)
             SchnorrSignWrapper.sign_2_sign_bitcoin(signWrapper,params_sign_2, bitcoinParams.transaction.bitcoinSerialize(),scriptContainer)
         }
 

@@ -23,6 +23,7 @@ import org.bitcoinj.core.Address
 import org.bitcoinj.core.Coin
 import org.bitcoinj.core.Transaction
 import org.bitcoinj.core.TransactionWitness
+import org.bitcoinj.wallet.Wallet
 import java.util.*
 
 enum class ProposalState {
@@ -126,7 +127,7 @@ class FrostViewModel(
                             bitcoinAddress = bitcoinService.personalAddress.toString()
                         }
                         bitcoinNumPeers = amountOfPeers
-                        bitcoinBalance = bitcoinService.kit.wallet().balance.toFriendlyString()
+                        bitcoinBalance = bitcoinService.kit.wallet().getBalance(Wallet.BalanceType.AVAILABLE_SPENDABLE).toFriendlyString()
                         bitcoinDaoAddress?.let {
                             bitcoinDaoBalance = bitcoinService.getBalanceForTrackedAddress(it).toFriendlyString()
                         }
@@ -236,7 +237,7 @@ class FrostViewModel(
                             foundInMyProps.transaction.inputs[0].witness =TransactionWitness(1).also { witness ->
                                witness.setPush(0,it.signature.hexToBytes())
                             }
-                            Log.d("Bitcoin", "Signed tx: ${foundInMyProps.transaction.bitcoinSerialize().toHex()}")
+                            Log.d("FROST", "Signed tx: ${foundInMyProps.transaction.bitcoinSerialize().toHex()}")
                             toastMaker("SIGNED BITCOIN")
                             return@collect
                         }
@@ -305,6 +306,7 @@ class FrostViewModel(
         val tx = bitcoinService.createSendTransactionForDaoAccount(bitcoinDaoAddress!!, Coin.valueOf(amount), Address.fromString(bitcoinService.networkParams,recipient))
         if (tx.isSuccess){
             val (ok, id) = frostManager.proposeSignAsync(FrostManager.SignParams.Bitcoin(tx.getOrThrow()))
+            myProposals.add(BitcoinProposal(id,frostCommunity.myPeer.mid,tx.getOrThrow()))
         }else{
             toastMaker("could not create bitcoin transaction")
         }

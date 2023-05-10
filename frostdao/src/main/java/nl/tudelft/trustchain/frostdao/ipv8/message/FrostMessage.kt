@@ -16,6 +16,7 @@ fun messageIdFromMsg(msg: FrostMessage) : Int =
         is SignShare -> SignShare.MESSAGE_ID
         is SignRequest -> SignRequest.MESSAGE_ID
         is SignRequestResponse -> SignRequestResponse.MESSAGE_ID
+        is SignRequestBitcoin -> SignRequestBitcoin.MESSAGE_ID
         else -> error("TODO: Compiler has a bug??")
     }
 

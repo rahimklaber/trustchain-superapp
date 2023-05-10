@@ -18,7 +18,10 @@ import nl.tudelft.trustchain.frostdao.database.FrostDatabase
 import nl.tudelft.trustchain.frostdao.database.Me
 import nl.tudelft.trustchain.frostdao.database.Request
 import nl.tudelft.trustchain.frostdao.ipv8.message.*
+import org.bitcoinj.core.SegwitAddress
 import org.bitcoinj.core.Transaction
+import org.bitcoinj.params.RegTestParams
+import org.bitcoinj.script.ScriptBuilder
 import java.util.*
 import kotlin.random.Random
 import kotlin.reflect.KClass
@@ -153,6 +156,9 @@ class FrostManager(
                 msg as SignRequestResponse
             )
         }
+        msgProcessMap[SignRequestBitcoin::class] = { peer,msg ->
+            processSignRequestBitcoin(peer,msg as SignRequestBitcoin)
+        }
     }
 
     var keyGenJob: Job? = null
@@ -160,8 +166,8 @@ class FrostManager(
     val signJobs = mutableMapOf<Long, Job>()
 
     private var agent: SchnorrAgent? = null
-    var agentSendChannel = Channel<SchnorrAgentMessage>(1)
-    var agentReceiveChannel = Channel<SchnorrAgentOutput>(1)
+    var agentSendChannel = Channel<SchnorrAgentMessage>(10)
+    var agentReceiveChannel = Channel<SchnorrAgentOutput>(10)
 
     private var joinId = -1L
 
@@ -440,6 +446,7 @@ class FrostManager(
         }
 
         fun fail() {
+            Log.d("FROST", "failing sign")
             state =
                 FrostState.ReadyForSign
             removePreprocessCallback(preprocessCbId)
@@ -511,7 +518,16 @@ class FrostManager(
         val signDone = withTimeoutOrNull(config.signTimeout) {
             val toSign = if(signParams is SignParams.Test) signParams.data else null
             val bitcoinParams = if (signParams is SignParams.Bitcoin){
-                SchnorrAgent.BitcoinParams(signParams.transaction)
+                // I gues when you serialize the tx you lose some info?
+                val inputWithVals =bitcoinService.getTrackedOutputs()
+                    .find { it.parentTransactionHash ==  signParams.transaction.inputs[0].outpoint.hash && it.index ==  signParams.transaction.inputs[0].outpoint.index.toInt()}
+                    ?: error("we do not know about this output")
+                val tx = Transaction(bitcoinService.networkParams)
+                tx.addInput(inputWithVals.parentTransactionHash, inputWithVals.index.toLong(), ScriptBuilder.createOutputScript(
+                    SegwitAddress.fromProgram(RegTestParams.get(),1, agent!!.keyWrapper._bitcoin_encoded_key)))
+                tx.addOutput(signParams.transaction.outputs[0])
+
+                SchnorrAgent.BitcoinParams(tx, inputWithVals.value.value)
             } else null
             agent!!.startSigningSession(signId.toInt(), toSign, bitcoinParams, agentSendChannel, agentReceiveChannel)
         }
@@ -663,6 +679,8 @@ class FrostManager(
             index,
             threshold = midsOfNewGroup.size / 2 + 1
         )
+
+        Log.d("FROST","frost info is set")
 
         dbMe = dbMe.copy(
             frostKeyShare = agent!!.keyWrapper.serialize(),
@@ -877,6 +895,18 @@ class FrostManager(
             FrostState.ReadyForSign -> {
                 scope.launch {
                     updatesChannel.emit(Update.SignRequestReceived(msg.id, peer.mid, msg.data))
+                }
+            }
+
+            else -> {}
+        }
+    }
+
+    private fun processSignRequestBitcoin(peer: Peer, msg: SignRequestBitcoin){
+        when (state) {
+            FrostState.ReadyForSign -> {
+                scope.launch {
+                    updatesChannel.emit(Update.BitcoinSignRequestReceived(msg.id,peer.mid,Transaction(bitcoinService.networkParams, msg.tx)))
                 }
             }
 
