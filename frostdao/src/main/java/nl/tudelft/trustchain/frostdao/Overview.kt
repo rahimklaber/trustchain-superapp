@@ -59,7 +59,7 @@ class Overview : AppCompatActivity() {
         // menu should be considered as top level destinations.
         val appBarConfiguration = AppBarConfiguration(
             setOf(
-                R.id.frostSettings, R.id.propose
+                R.id.frostSettings, R.id.propose, R.id.debugFragment
             )
         )
         setupActionBarWithNavController(navController, appBarConfiguration)

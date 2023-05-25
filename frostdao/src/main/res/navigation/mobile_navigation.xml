@@ -19,4 +19,9 @@
         android:name="nl.tudelft.trustchain.frostdao.ui.proposals.Proposals"
         android:label="fragment_proposals"
         tools:layout="@layout/fragment_proposals" />
+    <fragment
+        android:id="@+id/debugFragment"
+        android:name="nl.tudelft.trustchain.frostdao.ui.debug.DebugFragment"
+        android:label="fragment_debug"
+        tools:layout="@layout/fragment_debug" />
 </navigation>

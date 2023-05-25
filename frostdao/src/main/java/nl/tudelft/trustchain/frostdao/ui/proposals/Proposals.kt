@@ -8,7 +8,6 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material3.Button
 import androidx.compose.material3.Divider
 import androidx.compose.material3.Text
 import androidx.compose.ui.Alignment
@@ -24,7 +23,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import nl.tudelft.trustchain.frostdao.BitcoinProposal
 import nl.tudelft.trustchain.frostdao.FrostViewModel
-import nl.tudelft.trustchain.frostdao.SignProposal
 import javax.inject.Inject
 
 
@@ -52,17 +50,18 @@ class Proposals : Fragment() {
                 ) {
                     Text("My Proposals", fontSize = 32.sp)
                     Divider(thickness = 2.dp)
-                    LazyColumn(Modifier.fillMaxHeight(0.4f), contentPadding = PaddingValues(vertical = 4.dp)) {
-                        items(frostViewModel.myProposals){
-                            Row{
-                                Column {
-                                    Text("type: ${it.type()}")
-                                    Text("proposer: ${it.fromMid.subSequence(0,5)}...")
-                                }
-                                if((it is SignProposal)){
+                    LazyColumn(
+                        Modifier.fillMaxHeight(0.4f),
+                        contentPadding = PaddingValues(vertical = 4.dp)
+                    ) {
+                        items(frostViewModel.myProposals) {
+                            Row {
+                                if ((it is BitcoinProposal)) {
                                     Column {
-                                        Text("signed: ${it.signed}")
-                                        Text("signature: ${it.signatureHex.take(5)}...")
+                                        Text("status: ${it.state.value}")
+                                    }
+                                    Column {
+                                        Text("Amount: ${it.transaction.outputSum}")
                                     }
                                 }
 
@@ -71,46 +70,24 @@ class Proposals : Fragment() {
                     }
                     Text("Proposals", fontSize = 32.sp)
                     Divider(thickness = 2.dp)
-                    LazyColumn(Modifier.fillMaxHeight(0.4f), contentPadding = PaddingValues(vertical = 4.dp)) {
-                        items(frostViewModel.proposals){
-                            Row{
-                                Column {
-                                    Text("type: ${it.type()}")
-                                    Text("proposer: ${it.fromMid.subSequence(0,5)}...")
-                                }
-                                if((it is SignProposal)){
-                                    Column {
-                                        Text("signed: ${it.signed}")
-                                        Text("signature: ${it.signatureHex.take(5)}...")
-                                    }
-
-                                    if (!it.signed){
-                                        Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd){
-                                            Button(onClick = {
-                                                frostViewModel.viewModelScope.launch(Dispatchers.Default) {
-                                                    frostViewModel.acceptSign(it.id)
-                                                }
-                                            }) {
-                                                Text("accept")
+                    LazyColumn(
+                        Modifier.fillMaxHeight(),
+                        contentPadding = PaddingValues(vertical = 4.dp)
+                    ) {
+                        items(frostViewModel.proposals) {
+                            Row {
+                                if (it is BitcoinProposal) {
+                                    BitcoinProposalCard(
+                                        proposal = it,
+                                        networkParameters = frostViewModel.bitcoinService.networkParams,
+                                        canAccept = true,
+                                        onAccept = {
+                                            frostViewModel.viewModelScope.launch(Dispatchers.Default) {
+                                                frostViewModel.acceptSign(it.id)
                                             }
                                         }
-                                    }
-                                }else if(it is BitcoinProposal){
-                                    Column {
-                                        Text("signed: ${it.done}")
-                                    }
+                                    )
 
-                                    if (!it.done){
-                                        Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd){
-                                            Button(onClick = {
-                                                frostViewModel.viewModelScope.launch(Dispatchers.Default) {
-                                                    frostViewModel.acceptSign(it.id)
-                                                }
-                                            }) {
-                                                Text("accept")
-                                            }
-                                        }
-                                    }
                                 }
 
                             }

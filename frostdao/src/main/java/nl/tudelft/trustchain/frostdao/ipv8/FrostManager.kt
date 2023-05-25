@@ -49,7 +49,6 @@ sealed interface Update {
     data class KeyGenDone(val pubkey: String) : Update
     data class StartedKeyGen(val id: Long) : Update
     data class ProposedKeyGen(val id: Long) : Update
-    data class SignRequestReceived(val id: Long, val fromMid: String, val data: ByteArray) : Update
     data class BitcoinSignRequestReceived(val id: Long, val fromMid: String, val transaction: Transaction) : Update
     data class SignDone(val id: Long, val signature: String) : Update
     data class TextUpdate(val text: String) : Update
@@ -166,6 +165,8 @@ class FrostManager(
     val signJobs = mutableMapOf<Long, Job>()
 
     private var agent: SchnorrAgent? = null
+    val bitcoinDaoKey: ByteArray?
+        get() =  agent?.keyWrapper?._bitcoin_encoded_key
     var agentSendChannel = Channel<SchnorrAgentMessage>(10)
     var agentReceiveChannel = Channel<SchnorrAgentOutput>(10)
 
@@ -248,19 +249,6 @@ class FrostManager(
         scope.launch {
             receiveChannel
                 .collect {
-//                    Log.d("FROST", "received msg in frostmanager ${it.second}")
-                    if (messageIdFromMsg(it.second) == SignRequest.MESSAGE_ID) {
-                        db.requestDao()
-                            .insertRequest(
-                                Request(
-                                    unixTime = Date().time / 1000,
-                                    type = messageIdFromMsg(it.second),
-                                    requestId = it.second.id,
-                                    data = it.second.serialize(),
-                                    fromMid = it.first.mid,
-                                )
-                            )
-                    }
                     processMsg(it)
                 }
         }
@@ -271,28 +259,28 @@ class FrostManager(
                 -1,
                 byteArrayOf(0), 0, 1, 1, listOf("")
             )
-//            if (storedMe != null){
-//                agent = SchnorrAgent(storedMe.frostKeyShare,storedMe.frostN,storedMe.frostIndex,storedMe.frostThresholod, agentSendChannel, agentReceiveChannel)
-//                dbMe = storedMe
-////                delay(5000)
-//                frostInfo = FrostGroup(
-//                    members = storedMe.frostMembers.map {
-//                        val (mid, indexstr) = it.split("#").take(2)
-//                        FrostMemberInfo(
-//                           mid,
-//                            indexstr.toInt()
-//                        )
-//                    },
-//                    threshold = dbMe.frostThresholod,
-//                    myIndex = dbMe.frostIndex
-//                )
-//                state = FrostState.ReadyForSign
-//            }else{
-//                dbMe = Me(
-//                    -1,
-//                    byteArrayOf(0),0,1,1, listOf("")
-//                )
-//            }
+            if (storedMe != null){
+                agent = SchnorrAgent(storedMe.frostKeyShare,storedMe.frostN,storedMe.frostIndex,storedMe.frostThresholod, agentSendChannel, agentReceiveChannel)
+                dbMe = storedMe
+//                delay(5000)
+                frostInfo = FrostGroup(
+                    members = storedMe.frostMembers.map {
+                        val (mid, indexstr) = it.split("#").take(2)
+                        FrostMemberInfo(
+                           mid,
+                            indexstr.toInt()
+                        )
+                    },
+                    threshold = dbMe.frostThresholod,
+                    myIndex = dbMe.frostIndex
+                )
+                state = FrostState.ReadyForSign
+            }else{
+                dbMe = Me(
+                    -1,
+                    byteArrayOf(0),0,1,1, listOf("")
+                )
+            }
         }
 
     }
@@ -851,16 +839,6 @@ class FrostManager(
         onJoinRequestResponseCallbacks.forEach {
             it.value(peer, msg)
         }
-//        when(state){
-//            is FrostState.RequestedToJoin ->{
-//                if (msg.id != (state as FrostState.RequestedToJoin).id){
-//                    //todo deal with this
-//                    // send back a msg?
-//                    return
-//                }
-//                state =
-//            }
-//        }
     }
 
     private fun processKeyGenCommitments(peer: Peer, msg: KeyGenCommitments) {
@@ -894,7 +872,7 @@ class FrostManager(
         when (state) {
             FrostState.ReadyForSign -> {
                 scope.launch {
-                    updatesChannel.emit(Update.SignRequestReceived(msg.id, peer.mid, msg.data))
+//                    updatesChannel.emit(Update.SignRequestReceived(msg.id, peer.mid, msg.data))
                 }
             }
 
@@ -928,10 +906,6 @@ class FrostManager(
             waitForKeygenResponseTimeout = (5 * 60 * 1000).milliseconds,
             waitForInitialPreprocessTimeout = (5 * 60 * 1000).milliseconds
         )
-//        const val SIGN_TIMEOUT_MILLIS = 10 * 60 * 1000L
-//        const val KEYGEN_TIMEOUT_MILLIS = 10 * 60 * 1000L
-//        const val WAIT_FOR_KEYGEN_TIMEOUT_MILLIS = 5 * 60 * 1000L
-//        const val WAIT_FOR_INITIAL_PREPROCESS_MILLIS = 5 * 60 * 1000L
     }
 
 }

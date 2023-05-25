@@ -43,7 +43,8 @@ class SchnorrAgent(
 ){
 
     constructor(
-        keyByteArray: ByteArray, numberOfParticipants: Int,
+        keyByteArray: ByteArray,
+        numberOfParticipants: Int,
         index: Int,
         threshold: Int,
         receiveChannel: ReceiveChannel<SchnorrAgentMessage>,

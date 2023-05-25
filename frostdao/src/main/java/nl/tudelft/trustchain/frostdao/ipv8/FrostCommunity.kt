@@ -33,9 +33,6 @@ data class FrostGroup(
         get() = members.size + 1 // we are not included here
 }
 
-//typealias OnJoinRequestCallBack = (Peer, RequestToJoinMessage) -> Unit
-//typealias onJoinRequestResponseCallback = (Peer, RequestToJoinResponseMessage) -> Unit
-
 class FrostCommunity: Community() {
     override val serviceId: String
         get() = "5ce0aab9123b60537030b1312783a0ebcf5fd92f"
@@ -214,7 +211,7 @@ class FrostCommunity: Community() {
             }
         }
         scope.launch(Dispatchers.Default) {
-            var afterDate = Date().time / 1000
+            val afterDate = Date().time / 1000
             while (true) {
                 delay(delayAmount + 600_000)
                 Log.d("FROST", "sending gossip request")
