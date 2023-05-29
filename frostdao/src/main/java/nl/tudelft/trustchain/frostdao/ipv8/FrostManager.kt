@@ -53,6 +53,8 @@ sealed interface Update {
     data class SignDone(val id: Long, val signature: String) : Update
     data class TextUpdate(val text: String) : Update
     data class TimeOut(val id: Long) : Update
+    data class Rejected(val id: Long): Update
+    data class NotEnoughVotes(val id: Long): Update
 }
 
 
@@ -303,7 +305,9 @@ class FrostManager(
 
         scope.launch {
             var responseCounter = 0
+            var rejectCounter = 0
             val mutex = Mutex(true)
+            var rejected = false
             val participatingIndices = mutableListOf<Int>()
             val callbacId = addOnSignRequestResponseCallbac { peer, signRequestResponse ->
                 if (signRequestResponse.id != signId) {
@@ -311,13 +315,21 @@ class FrostManager(
                 }
                 if (signRequestResponse.ok)
                     responseCounter += 1
-                participatingIndices.add(
-                    frostInfo?.getIndex(peer.mid)
-                        ?: error(" FrostInfo is null. This is a bug. Maybe you are trying to sign without having first joined a group")
-                )
-                if (responseCounter >= frostInfo!!.threshold - 1) {
-                    mutex.unlock()
+                    participatingIndices.add(
+                        frostInfo?.getIndex(peer.mid)
+                            ?: error(" FrostInfo is null. This is a bug. Maybe you are trying to sign without having first joined a group")
+                    )
+                    if (responseCounter >= frostInfo!!.threshold - 1) {
+                        mutex.unlock()
+                    }
+                else{
+                    rejectCounter +=1
+                    if (rejectCounter >=  (frostInfo!!.amount - (frostInfo!!.threshold - 1))){
+                        rejected = true
+                        mutex.unlock()
+                    }
                 }
+
             }
             val signRequest = when (signParams) {
                 is SignParams.Test -> SignRequest(signId, signParams.data)
@@ -342,7 +354,15 @@ class FrostManager(
                 return@launch
             }
 
+
             onSignRequestResponseCallbacks.remove(callbacId)
+
+            if (rejected){
+                Log.d("FROST", "Not enough votes to sign. Cancelling...")
+
+                updatesChannel.emit(Update.NotEnoughVotes(signId))
+                return@launch
+            }
 
             Log.d("FROST", "started sign")
 
@@ -362,6 +382,15 @@ class FrostManager(
 
 
         return true to signId
+    }
+
+    suspend fun rejectProposedSign(id: Long, fromMid: String){
+        val (_, amountDropped) = networkManager.send(
+            networkManager.getPeerFromMid(fromMid),
+            SignRequestResponse(id, false)
+        )
+        addDroppedMsgs(amountDropped)
+        updatesChannel.emit(Update.Rejected(id))
     }
 
     suspend fun acceptProposedSign(id: Long, fromMid: String, signParams: SignParams) {
@@ -594,10 +623,10 @@ class FrostManager(
                                 networkManager.getPeerFromMid(getMidFromIndex(agentOutput.forIndex)),
                                 KeyGenShare(joinId, agentOutput.share)
                             )
-                            addDroppedMsgs(amountDropped)
-                            sendSemaphore.release()
                             if (!ok)
                                 fail()
+                            addDroppedMsgs(amountDropped)
+                            sendSemaphore.release()
 
                         }
                     }
@@ -612,9 +641,9 @@ class FrostManager(
                                 )
                             )
                             addDroppedMsgs(amountDropped)
-                            sendSemaphore.release()
                             if (!ok)
                                 fail()
+                            sendSemaphore.release()
                         }
                     }
 

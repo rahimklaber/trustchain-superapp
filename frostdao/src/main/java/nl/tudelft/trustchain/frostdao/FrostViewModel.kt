@@ -51,7 +51,7 @@ data class BitcoinProposal(
     override var state: MutableState<ProposalState> = mutableStateOf(ProposalState.Proposed),
     ) : Proposal {
     val started = derivedStateOf { state.value != ProposalState.Proposed}
-    val done = derivedStateOf { state.value == ProposalState.Done}
+    val done = derivedStateOf { state.value == ProposalState.Done || state.value == ProposalState.Cancelled || state.value == ProposalState.Rejected}
     override fun type(): String = "Bitcoin"
 }
 //todo: I will need to change this if I decide to send the unused Bitcoin back to the DAO.
@@ -244,6 +244,18 @@ class FrostViewModel(
 
                         Log.d("FROST","Timed out action with id ${it.id}")
                     }
+
+                    is Update.NotEnoughVotes -> {
+                        toastMaker("Too many members reject proposal.")
+                        findBitcoinProposalInProposedByMe(it.id)?.let { proposal ->
+                            proposal.state.value = ProposalState.Cancelled
+                        }
+                    }
+                    is Update.Rejected -> {
+                        findBitcoinProposalInReceived(it.id)?.let { proposal ->
+                            proposal.state.value = ProposalState.Rejected
+                        }
+                    }
                 }
             }
         }
@@ -292,11 +304,20 @@ class FrostViewModel(
         }
     }
 
-    suspend fun acceptSign(id: Long){
-        val prop = proposals
+    fun findBitcoinProposalInReceived(id:Long): BitcoinProposal? =
+        proposals
+        .find {
+            it is BitcoinProposal && it.id == id
+        } as BitcoinProposal?
+
+    fun findBitcoinProposalInProposedByMe(id:Long): BitcoinProposal? =
+        myProposals
             .find {
                 it is BitcoinProposal && it.id == id
             } as BitcoinProposal?
+
+    suspend fun acceptSign(id: Long){
+        val prop = findBitcoinProposalInReceived(id)
 
         if(prop == null){
             toastMaker("Could not accept proposal.")
@@ -318,8 +339,17 @@ class FrostViewModel(
             }
         }
         prop.state.value = ProposalState.Started
-        delay(3000)
         frostManager.acceptProposedSign(prop.id,prop.fromMid,FrostManager.SignParams.Bitcoin(prop.transaction))
+    }
+
+    suspend fun rejectSign(id: Long){
+        val prop = findBitcoinProposalInReceived(id) ?: run{
+            toastMaker("Could not find proposal")
+            Log.d("FROST", "cold not reject sign proposal. We could not find a proposal with this id")
+            return
+        }
+        frostManager.rejectProposedSign(id,prop.fromMid)
+        prop.state.value = ProposalState.Rejected
     }
 
     // remove ongong actions

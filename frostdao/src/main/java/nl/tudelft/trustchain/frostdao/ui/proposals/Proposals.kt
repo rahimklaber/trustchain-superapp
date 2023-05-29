@@ -55,16 +55,13 @@ class Proposals : Fragment() {
                         contentPadding = PaddingValues(vertical = 4.dp)
                     ) {
                         items(frostViewModel.myProposals) {
-                            Row {
-                                if ((it is BitcoinProposal)) {
-                                    Column {
-                                        Text("status: ${it.state.value}")
-                                    }
-                                    Column {
-                                        Text("Amount: ${it.transaction.outputSum}")
-                                    }
-                                }
-
+                            if(it is BitcoinProposal){
+                                BitcoinProposalCard(
+                                    proposal = it,
+                                    networkParameters = frostViewModel.bitcoinService.networkParams,
+                                    canAccept = false,
+                                    frostViewModel.toastMaker,
+                                )
                             }
                         }
                     }
@@ -74,16 +71,23 @@ class Proposals : Fragment() {
                         Modifier.fillMaxHeight(),
                         contentPadding = PaddingValues(vertical = 4.dp)
                     ) {
-                        items(frostViewModel.proposals) {
+                        items(frostViewModel.proposals) { proposal ->
                             Row {
-                                if (it is BitcoinProposal) {
+                                if (proposal is BitcoinProposal) {
                                     BitcoinProposalCard(
-                                        proposal = it,
+                                        proposal = proposal,
                                         networkParameters = frostViewModel.bitcoinService.networkParams,
                                         canAccept = true,
-                                        onAccept = {
+                                        toastMaker = frostViewModel.toastMaker,
+                                        onAccept = {accept ->
                                             frostViewModel.viewModelScope.launch(Dispatchers.Default) {
-                                                frostViewModel.acceptSign(it.id)
+                                                if(accept)
+                                                    frostViewModel.acceptSign(proposal.id)
+                                                else{
+                                                    //we reject the proposal
+                                                    frostViewModel.rejectSign(proposal.id)
+                                                }
+
                                             }
                                         }
                                     )

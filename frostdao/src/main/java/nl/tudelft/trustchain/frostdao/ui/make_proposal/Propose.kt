@@ -68,6 +68,10 @@ class Propose : Fragment() {
                             frostViewModel.viewModelScope.launch (Dispatchers.Default){
 //                                frostViewModel.proposeSign(Random.nextBytes(32))
                                 frostViewModel.proposeSignBitcoin(sendAmount,address)
+                                address = ""
+                                sendAmount = 0
+                                frostViewModel.toastMaker("Proposal created!")
+
                             }
                         }) {
                             Text("Propose")
