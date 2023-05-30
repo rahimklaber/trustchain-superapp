@@ -15,7 +15,10 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.fragment.app.Fragment
+import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.AndroidEntryPoint
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import nl.tudelft.trustchain.frostdao.FrostViewModel
 import javax.inject.Inject
 
@@ -89,9 +92,17 @@ class FrostSettings : Fragment() {
                             }
                             Text("DAO ID: xxxx")
                             Text("${frostViewModel.amountOfMembers ?: "?"} Members")
+                            Button(onClick = {
+                                frostViewModel.viewModelScope.launch(Dispatchers.Default) {
+                                    frostViewModel.joinFrost()
+                                }
+                            }) {
+                                Text(text = "Join Group")
+                            }
 
                         }
                     }
+
                     Card(
                         Modifier
                             .fillMaxWidth(0.8f)

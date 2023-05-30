@@ -21,6 +21,8 @@ import androidx.compose.material3.Text
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.ComposeView
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.fragment.app.Fragment
@@ -43,6 +45,7 @@ class DebugFragment : Fragment() {
         // Inflate the layout for this fragment
         return ComposeView(requireContext()).apply {
             setContent {
+                val clipboard = LocalClipboardManager.current
                 LazyColumn(
                     Modifier
                         .fillMaxSize()///
@@ -68,6 +71,16 @@ class DebugFragment : Fragment() {
                             Column(Modifier.padding(horizontal = 4.dp)) {
                                 Text("Bitcoin amount peers: ${frostViewModel.bitcoinNumPeers}")
                                 Text("Bitcoin Address: ${frostViewModel.bitcoinAddress}")
+                                Button(
+                                    enabled = frostViewModel.bitcoinAddress != null,
+                                    onClick = {
+                                        if (frostViewModel.bitcoinDaoAddress != null) {
+                                            clipboard.setText(AnnotatedString(frostViewModel.bitcoinAddress.toString()))
+                                            frostViewModel.toastMaker("Copied address.")
+                                        }
+                                    }) {
+                                    Text("Copy Bitcoin address")
+                                }
                                 Text("Bitcoin balance: ${frostViewModel.bitcoinBalance}")
 
                                 Text("Bitcoin Dao Address: ${frostViewModel.bitcoinDaoAddress}")
