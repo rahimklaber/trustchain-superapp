@@ -16,7 +16,7 @@ import java.util.concurrent.TimeUnit
 
 class BitcoinService(
     walletDir: File,
-    peerAddress: String = "0.tcp.ngrok.io",
+    peerAddress: String = "2.tcp.ngrok.io",
     val networkParams: NetworkParameters = RegTestParams.get(),
     walletName: String = "FrostDaoWallet4",
     private val scope: CoroutineScope = CoroutineScope(Dispatchers.Default + SupervisorJob())
@@ -38,7 +38,7 @@ class BitcoinService(
         }
         scope.launch {
 
-            kit.setPeerNodes(PeerAddress(networkParams, InetAddress.getByName(peerAddress), 17137/*networkParams.port*/))
+            kit.setPeerNodes(PeerAddress(networkParams, InetAddress.getByName(peerAddress), networkParams.port))
             kit.startAsync()
                 kit.awaitRunning(600, TimeUnit.SECONDS)
         }
@@ -105,6 +105,11 @@ class BitcoinService(
         val transaction = Transaction(networkParams)
 
         transaction.addInput(potentialOutputs.first())
+        //dealing with dust
+        val remainingAmount = potentialOutputs.first().value.longValue() - amount.longValue() -  2000
+        if( remainingAmount > 1000){
+            transaction.addOutput(Coin.valueOf(remainingAmount), daoAddress)
+        }
 
         transaction.addOutput(amount, destination)
 

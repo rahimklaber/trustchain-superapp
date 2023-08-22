@@ -7,21 +7,21 @@
     <fragment
         android:id="@+id/frostSettings"
         android:name="nl.tudelft.trustchain.frostdao.ui.settings.FrostSettings"
-        android:label="fragment_frost_settings"
-        tools:layout="@layout/fragment_frost_settings"/>
+        android:label="Home"
+        tools:layout="@layout/fragment_frost_settings" />
     <fragment
         android:id="@+id/propose"
         android:name="nl.tudelft.trustchain.frostdao.ui.make_proposal.Propose"
-        android:label="fragment_propose"
+        android:label="Create Proposal"
         tools:layout="@layout/fragment_propose" />
     <fragment
         android:id="@+id/proposals"
         android:name="nl.tudelft.trustchain.frostdao.ui.proposals.Proposals"
-        android:label="fragment_proposals"
+        android:label="Proposals"
         tools:layout="@layout/fragment_proposals" />
     <fragment
         android:id="@+id/debugFragment"
         android:name="nl.tudelft.trustchain.frostdao.ui.debug.DebugFragment"
-        android:label="fragment_debug"
+        android:label="Debug"
         tools:layout="@layout/fragment_debug" />
 </navigation>

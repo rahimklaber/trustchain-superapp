@@ -56,10 +56,10 @@ data class BitcoinProposal(
 }
 //todo: I will need to change this if I decide to send the unused Bitcoin back to the DAO.
 fun BitcoinProposal.BtcAmount(): Coin{
-    return transaction.outputSum
+    return transaction.outputs[1].value
 }
 fun BitcoinProposal.recipient(networkParams: NetworkParameters): Address? {
-    return transaction.outputs.firstOrNull()?.scriptPubKey?.getToAddress(networkParams)
+    return transaction.outputs[1]?.scriptPubKey?.getToAddress(networkParams)
 }
 
 

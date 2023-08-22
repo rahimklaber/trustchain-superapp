@@ -28,7 +28,10 @@ import kotlin.reflect.KClass
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.milliseconds
 
-
+object TimeContainter{
+    var start = 0L
+    var stop = 0L
+}
 fun FrostGroup.getIndex(mid: String) = members.find { it.peer == mid }?.index
 fun FrostGroup.getMidForIndex(index: Int) = members.find { it.index == index }?.peer
 
@@ -256,7 +259,7 @@ class FrostManager(
         }
 
         scope.launch(Dispatchers.Default) {
-            val storedMe = db.meDao().get()
+            val storedMe : Me?=/* db.meDao().get()*/ null
             dbMe = Me(
                 -1,
                 byteArrayOf(0), 0, 1, 1, listOf("")
@@ -543,6 +546,7 @@ class FrostManager(
                 tx.addInput(inputWithVals.parentTransactionHash, inputWithVals.index.toLong(), ScriptBuilder.createOutputScript(
                     SegwitAddress.fromProgram(RegTestParams.get(),1, agent!!.keyWrapper._bitcoin_encoded_key)))
                 tx.addOutput(signParams.transaction.outputs[0])
+                tx.addOutput(signParams.transaction.outputs[1])
 
                 SchnorrAgent.BitcoinParams(tx, inputWithVals.value.value)
             } else null
@@ -686,6 +690,8 @@ class FrostManager(
         while (sendSemaphore.availablePermits != semaphoreMaxPermits) {
             delay(1000)
         }
+        TimeContainter.stop = System.currentTimeMillis()
+        Log.d("FROST","time: ${TimeContainter.stop - TimeContainter.start}")
         this@FrostManager.frostInfo = FrostGroup(
             (midsOfNewGroup.filter { it != networkManager.getMyPeer().mid }).map {
                 FrostMemberInfo(
@@ -720,6 +726,7 @@ class FrostManager(
     }
 
     suspend fun joinGroup(peer: Peer) {
+        TimeContainter.start = System.currentTimeMillis()
         joinId = Random.nextLong()
         if (state != FrostState.ReadyForKeyGen) {
             return

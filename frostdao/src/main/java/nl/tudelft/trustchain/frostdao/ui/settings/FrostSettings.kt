@@ -5,6 +5,7 @@ import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material3.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -41,75 +42,83 @@ class FrostSettings : Fragment() {
         return ComposeView(requireContext()).apply {
             setContent {
                 val clipboard = LocalClipboardManager.current
-                Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally) {
-                    Card(
-                        Modifier
-                            .fillMaxWidth(0.8f)
-                            .padding(10.dp)
-                    ) {
-                        Column(
+                LazyColumn(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally) {
+                    item{
+                        Card(
                             Modifier
-                                .fillMaxWidth()
-                                .padding(5.dp), horizontalAlignment = Alignment.CenterHorizontally
+                                .fillMaxWidth(0.9f)
+                                .padding(10.dp)
                         ) {
-                            Text(frostViewModel.bitcoinDaoBalance ?: "??", fontSize = 40.sp)
-                            Text("DAO Balance", color = Color.Gray)
-                        }
-                    }
-                    Card(
-                        Modifier
-                            .fillMaxWidth(0.8f)
-                            .padding(10.dp)
-                    ) {
-                        Text(
-                            "DAO Details",
-                            modifier = Modifier.align(Alignment.CenterHorizontally),
-                            fontSize = 20.sp
-                        )
-                        Column(
-                            Modifier
-                                .fillMaxWidth()
-                                .padding(5.dp)
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceAround
+                            Column(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .padding(5.dp), horizontalAlignment = Alignment.CenterHorizontally
                             ) {
-                                Text("DAO account: ${frostViewModel.bitcoinDaoAddress?.let {
-                                    "${it.toString().take(5)}...${it.toString().takeLast(5)}"
-                                } ?: "N/A"}")
-                                Button(
-                                    enabled = frostViewModel.bitcoinDaoAddress != null,
-                                    onClick = {
-                                        if (frostViewModel.bitcoinDaoAddress != null) {
-                                            clipboard.setText(AnnotatedString(frostViewModel.bitcoinDaoAddress.toString()))
-                                            frostViewModel.toastMaker("Copied address.")
-                                        }
-                                    }) {
-                                    Text("Copy")
-                                }
+                                Text(frostViewModel.bitcoinDaoBalance ?: "??", fontSize = 40.sp)
+                                Text("DAO Balance", color = Color.Gray)
                             }
-                            Text("DAO ID: xxxx")
-                            Text("${frostViewModel.amountOfMembers ?: "?"} Members")
-                            Button(onClick = {
-                                frostViewModel.viewModelScope.launch(Dispatchers.Default) {
-                                    frostViewModel.joinFrost()
-                                }
-                            }) {
-                                Text(text = "Join Group")
-                            }
-
                         }
                     }
+                    item{
+                        Card(
+                            Modifier
+                                .fillMaxWidth(0.9f)
+                                .padding(10.dp)
+                        ) {
+                            Text(
+                                "DAO Details",
+                                modifier = Modifier.align(Alignment.CenterHorizontally),
+                                fontSize = 20.sp
+                            )
+                            Column(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .padding(5.dp)
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.fillMaxWidth(),
+                                ) {
+                                    Text("DAO account: ${frostViewModel.bitcoinDaoAddress?.let {
+                                        "${it.toString().take(5)}...${it.toString().takeLast(5)}"
+                                    } ?: "N/A"}")
+                                    Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd)
+                                    {
+                                        Button(
+                                            enabled = frostViewModel.bitcoinDaoAddress != null,
+                                            onClick = {
+                                                if (frostViewModel.bitcoinDaoAddress != null) {
+                                                    clipboard.setText(AnnotatedString(frostViewModel.bitcoinDaoAddress.toString()))
+                                                    frostViewModel.toastMaker("Copied address.")
+                                                }
+                                            }) {
+                                            Text("Copy")
+                                        }
+                                    }
+                                }
+//                                Text("DAO ID: xxxx")
+                                Text("${frostViewModel.amountOfMembers ?: "?"} Members", Modifier.align(Alignment.Start))
+                                Button(onClick = {
+                                    frostViewModel.viewModelScope.launch(Dispatchers.Default) {
+                                        frostViewModel.joinFrost()
+                                    }
+                                }) {
+                                    Text(text = "Join Group")
+                                }
 
-                    Card(
-                        Modifier
-                            .fillMaxWidth(0.8f)
-                            .padding(10.dp)
-                    ) {
-                        ActivityGrid(viewModel = frostViewModel)
+                            }
+                        }
+
                     }
+                   item{
+                       Card(
+                           Modifier
+                               .fillMaxWidth(0.9f)
+                               .padding(10.dp)
+                       ) {
+                              ActivityGrid(viewModel = frostViewModel)
+                       }
+                   }
                 }
             }
         }
